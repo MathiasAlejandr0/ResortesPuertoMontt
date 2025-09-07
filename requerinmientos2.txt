@@ -1,0 +1,77 @@
+ Sobre la empresa
+•	¿Cuántos empleados usarán el sistema?
+DE 2 A 3
+•	¿En qué áreas (administración, taller, ventas, compras, bodega, etc.)?
+COMPRA, VENTAS, BODEGA, CLIENTES, ORDENES DE TRABAJO
+•	¿Qué software usan actualmente (Excel, papel, algún ERP)?
+EXCEL, PAPELES, ARCHIVADORES (TODO MANUAL) EN ALGUN MOMENTO SE UTILIZO UN ERP PARA TALLER (DIRUP)
+•	¿Cuál es el principal dolor/problema que quieren resolver?
+CONTROL DE STOCK, DETALLES DE VENTAS, FIDELIDAD DE CLIENTES, RESPALDO DE TRABAJOS REALIZADOS
+ Sobre el tipo de gestión
+1.	Inventario / Bodega
+o	¿Qué productos manejan? (resortes estándar, piezas personalizadas, insumos del taller)
+INSUMOS DE TALLER, ACERO PRETEMPLADO SE DIVIDE EN HOJAS CONVENCIONALES, PARABOLICAS O VENTILADAS, HOJAS TERMINADAS, Y HOJAS PRETEMPLADAS LISAS DE DISTINTAS MEDIDAS, ADEMAS DE COMPONENTES, COMO ABRAZADERAS, BUJES, PERNOS HEZAGONALES, SEGUROS, GRASERAS, PASADORES, PERNOS PARKER, PERNOS CENTRO
+o	¿Necesitan control de stock mínimo/máximo y alertas?
+SI
+o	¿Se requiere trazabilidad de repuestos (ej: lote, proveedor, fecha ingreso)?
+NO, SOLO DIFERENCIAR AL PROVEEDOR CON LOS PRODUCTOS QUE NOS ENVIA
+o	¿Cómo hacen entradas y salidas hoy (boleta, guía de despacho, albarán)?
+A TRAVEZ DEL SISTEMA GRATUITO DE SII
+2.	Taller mecánico
+o	¿Necesitan gestionar órdenes de trabajo (cliente, máquina, trabajo a realizar, repuestos usados, mano de obra)?
+SI, CLIENTE DATOS DEL VEHICULO DATOS COMERCIALES, INSUMOS Y REPUESTOS UTILIZADOS, PERSONAL A CARGO
+o	¿Desean calcular costo de cada trabajo (mano de obra + repuestos)?
+NO ES NECESARIO
+o	¿Llevan historial de reparaciones por cliente o por máquina?
+POR CLIENTE Y MAQUINA, PERO SIN UN MOTOR DE BUSQUEDA AMIGABLE
+3.	Clientes y ventas
+o	¿Necesitan módulo de clientes (CRM básico)?
+NO
+o	¿Quieren generar facturas, boletas o solo cotizaciones?
+NO, SOLO COTIZACION PARA INFORMACION INTERNA
+o	¿Se debe integrar con el SII (Servicio de Impuestos Internos) o solo control interno?
+NO, SOLO CONTROL INETERNO
+4.	Proveedores y compras
+o	¿Desean registrar proveedores y órdenes de compra?
+SI, SIN ORDEN DE COMPRA
+o	¿Requieren control de deudas o pagos?
+SI
+5.	Reportes
+o	¿Qué indicadores necesitan ver? (ej: stock bajo, trabajos pendientes, ventas mensuales, utilidad por trabajo)
+STOCK, FECHAS DE REPARACIONES 
+o	¿Necesitan exportar a Excel/PDF?
+STOCK
+
+6.	Accesibilidad y seguridad
+o	¿El sistema debe ser web (multiusuario remoto) o local en red interna?
+INTERNO
+o	¿Quieren control de usuarios con distintos roles (ej: bodega, administrador, taller)?
+SOLO ADMINISTRADORES, UN SOLO USUARIO
+o	¿Necesitan acceso desde celular?
+NO ES NECESARIO
+7.	Especificar colores institucionales (para aplicar en el sistema)
+ ROJO NEGRO Y BLANCO
+
+
+utilizar plantilla del taller mecanico de yt
+al momento de vender un repuesto si se utiliza menos el sistema debe reconocer que queda un restante de material vendido y debe quedar disponible para venta (ese sobrante)
+alertas de stock
+el sistema reconoce producto estrella, indica o da recomendaciones de que comprar en mayor cantidad y que comprar menos
+
+datos completos de cliente (nombre, teléfono, correo, rut, patente)
+en el informe del trabajo debe solo aparecer el precio final (no detallado por producto)
+
+el dueño necesita una celda en el informe donde colocar el precio final (esto no lo debe elegir el sistema) los precios lo pone el dueño alfinal (pero si deben aparecer los precios para que el dueño los visualice pero no el cliente
+
+control de inventario
+listado de trabajadores por maquina (puede ser 1 o varios en una sola maquina)
+el informe tiene que señalar fecha y hora del trabajo realizado en la maquina además de quienes trabajaron en la maquina
+
+historial de trabajos (que señale dueño de la maquina, patente, trabajo realizado)
+
+
+
+
+
+
+
