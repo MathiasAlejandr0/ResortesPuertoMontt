@@ -13,7 +13,6 @@ Sistema integral de gestión empresarial diseñado específicamente para tallere
 - **Clientes**: Administración completa de base de datos de clientes
 - **Inventario**: Control de stock, productos y repuestos
 - **Cotizaciones**: Sistema de cotizaciones y ventas profesional
-- **Proveedores**: Gestión de proveedores y compras
 - **Reportes**: Generación de reportes y análisis
 
 ### 🎨 **Interfaz Moderna y Profesional**
@@ -105,11 +104,6 @@ Sistema integral de gestión empresarial diseñado específicamente para tallere
 - Envío por email y WhatsApp
 - Conversión a ventas
 
-### 🏭 **Gestión de Proveedores**
-- Base de datos de proveedores
-- Información de contacto
-- Historial de compras
-- Gestión de precios
 
 ### 📊 **Reportes y Análisis**
 - Reportes de ventas
@@ -180,14 +174,10 @@ Este proyecto está desarrollado específicamente para Resortes Puerto Montt. To
 
 ### Versión Actual
 - **v1.0.0**: Versión inicial completa
-- **Fecha**: Enero 2025
+- **Fecha**: septiembre 2025
 - **Estado**: Estable y funcional
 
-### Próximas Actualizaciones
-- Integración con sistemas de pago
-- Módulo de facturación
-- App móvil complementaria
-- Integración con sistemas contables
+
 
 ---
 
