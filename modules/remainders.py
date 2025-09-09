@@ -6,7 +6,7 @@ Maneja los restos de materiales cuando se vende más cantidad de la que se usa
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
-from .styles import (
+from modules.styles import (
     create_styled_button, create_styled_frame, create_styled_label, 
     create_styled_entry, COLORS, FONTS
 )

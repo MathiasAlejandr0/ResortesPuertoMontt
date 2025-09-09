@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime, timedelta
 import sqlite3
-from .styles import (
+from modules.styles import (
     create_styled_button, create_styled_frame, create_styled_label, 
     create_styled_entry, COLORS, FONTS
 )

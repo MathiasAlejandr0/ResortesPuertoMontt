@@ -4,9 +4,9 @@ from datetime import datetime
 import sqlite3
 import pandas as pd
 import os
-from .styles import create_styled_button, create_styled_frame, create_styled_label, create_styled_entry, COLORS, FONTS
-from .remainders import RemaindersManager
-from .analytics import ProductAnalytics, StockAlerts
+from modules.styles import create_styled_button, create_styled_frame, create_styled_label, create_styled_entry, create_centered_content, create_card_frame, COLORS, FONTS
+from modules.remainders import RemaindersManager
+from modules.analytics import ProductAnalytics, StockAlerts
 
 class InventoryModule:
     def __init__(self, parent, db, user_role):
@@ -26,807 +26,516 @@ class InventoryModule:
         self.parent.after(100, self.load_products_async)
     
     def create_widgets(self):
-        """Crear todos los widgets del módulo"""
+        """Crear todos los widgets del módulo centrados"""
         # Frame principal
-        main_frame = create_styled_frame(self.frame, bg=COLORS['white'])
-        main_frame.pack(fill='both', expand=True, padx=15, pady=15)
+        main_frame = tk.Frame(self.frame, bg=COLORS['bg_primary'])
+        main_frame.pack(fill='both', expand=True)
+        
+        # Contenedor centrado
+        center_container = tk.Frame(main_frame, bg=COLORS['bg_primary'])
+        center_container.place(relx=0.5, rely=0.5, anchor='center')
+        center_container.configure(width=1000, height=600)
         
         # Título
-        title_label = create_styled_label(
-            main_frame, 
-            text="📦 GESTIÓN DE INVENTARIO", 
-            font=FONTS['heading'],
-            bg=COLORS['primary'],
-            fg='white'
+        title_frame = tk.Frame(center_container, bg=COLORS['primary'], height=60)
+        title_frame.pack(fill='x', pady=(0, 20))
+        title_frame.pack_propagate(False)
+        
+        title_label = tk.Label(
+            title_frame,
+            text="📦 GESTIÓN DE INVENTARIO",
+            font=('Segoe UI', 18, 'bold'),
+            fg='white',
+            bg=COLORS['primary']
         )
-        title_label.pack(fill='x', pady=(0, 15))
+        title_label.pack(expand=True, fill='both', padx=20, pady=15)
         
         # Frame para botones principales
-        button_frame = create_styled_frame(main_frame, bg=COLORS['white'])
+        button_frame = tk.Frame(center_container, bg=COLORS['white'], relief='solid', bd=1)
         button_frame.pack(fill='x', pady=(0, 15))
         
+        # Botones en una fila
+        buttons_container = tk.Frame(button_frame, bg=COLORS['white'])
+        buttons_container.pack(fill='x', padx=20, pady=15)
+        
         # Botón para agregar producto
-        add_product_btn = create_styled_button(
-            button_frame, 
-            text="➕ Nuevo Producto", 
+        add_product_btn = tk.Button(
+            buttons_container,
+            text="➕ Nuevo Producto",
             command=self.show_product_form,
-            button_type='success',
-            width=15
+            font=('Segoe UI', 10, 'bold'),
+            bg=COLORS['success'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            cursor='hand2',
+            padx=15,
+            pady=8
         )
         add_product_btn.pack(side='left', padx=(0, 10))
         
         # Botón para editar producto
-        edit_product_btn = create_styled_button(
-            button_frame, 
+        edit_product_btn = tk.Button(
+            buttons_container,
             text="✏️ Editar",
             command=self.edit_selected_product,
-            button_type='primary',
-            width=12
+            font=('Segoe UI', 10, 'bold'),
+            bg=COLORS['primary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            cursor='hand2',
+            padx=15,
+            pady=8
         )
         edit_product_btn.pack(side='left', padx=(0, 10))
         
         # Botón para eliminar producto
-        delete_product_btn = create_styled_button(
-            button_frame,
+        delete_product_btn = tk.Button(
+            buttons_container,
             text="🗑️ Eliminar",
             command=self.delete_selected_product,
-            button_type='danger',
-            width=12
+            font=('Segoe UI', 10, 'bold'),
+            bg=COLORS['danger'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            cursor='hand2',
+            padx=15,
+            pady=8
         )
         delete_product_btn.pack(side='left', padx=(0, 10))
         
         # Botón para ver detalles
-        view_product_btn = create_styled_button(
-            button_frame,
+        details_btn = tk.Button(
+            buttons_container,
             text="👁️ Ver Detalles",
             command=self.view_product_details,
-            button_type='info',
-            width=12
+            font=('Segoe UI', 10, 'bold'),
+            bg=COLORS['info'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            cursor='hand2',
+            padx=15,
+            pady=8
         )
-        view_product_btn.pack(side='left', padx=(0, 10))
+        details_btn.pack(side='left', padx=(0, 10))
         
         # Botón para importar Excel
-        import_excel_btn = create_styled_button(
-            button_frame, 
+        import_btn = tk.Button(
+            buttons_container,
             text="📊 Importar Excel",
             command=self.import_excel,
-            button_type='warning',
-            width=15
+            font=('Segoe UI', 10, 'bold'),
+            bg=COLORS['secondary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            cursor='hand2',
+            padx=15,
+            pady=8
         )
-        import_excel_btn.pack(side='left', padx=(0, 10))
-        
-        # Botón para exportar Excel
-        export_excel_btn = create_styled_button(
-            button_frame, 
-            text="📤 Exportar Excel",
-            command=self.export_excel,
-            button_type='secondary',
-            width=15
-        )
-        export_excel_btn.pack(side='left', padx=(0, 10))
-        
-        # Botón para sobrantes
-        remainders_btn = create_styled_button(
-            button_frame, 
-            text="📦 Sobrantes",
-            command=self.show_remainders,
-            button_type='info',
-            width=12
-        )
-        remainders_btn.pack(side='left', padx=(0, 10))
-        
-        # Botón para análisis
-        analytics_btn = create_styled_button(
-            button_frame, 
-            text="⭐ Análisis",
-            command=self.show_analytics,
-            button_type='warning',
-            width=12
-        )
-        analytics_btn.pack(side='left', padx=(0, 10))
+        import_btn.pack(side='left')
         
         # Frame para búsqueda
-        search_frame = create_styled_frame(main_frame, bg=COLORS['white'])
+        search_frame = tk.Frame(center_container, bg=COLORS['white'], relief='solid', bd=1)
         search_frame.pack(fill='x', pady=(0, 15))
         
         # Campo de búsqueda
-        search_label = create_styled_label(
-            search_frame,
-            text="🔍 Buscar:",
-            font=FONTS['body'],
+        search_container = tk.Frame(search_frame, bg=COLORS['white'])
+        search_container.pack(fill='x', padx=20, pady=15)
+        
+        search_label = tk.Label(
+            search_container,
+            text="Buscar:",
+            font=('Segoe UI', 10, 'bold'),
+            fg=COLORS['text_primary'],
             bg=COLORS['white']
         )
         search_label.pack(side='left', padx=(0, 10))
         
-        self.product_search_entry = create_styled_entry(
-            search_frame,
-            width=50
+        self.search_entry = tk.Entry(
+            search_container,
+            font=('Segoe UI', 10),
+            bg='#f8f9fa',
+            fg=COLORS['text_primary'],
+            relief='solid',
+            bd=1,
+            width=40
         )
-        self.product_search_entry.pack(side='left', padx=(0, 10))
-        self.product_search_entry.bind('<KeyRelease>', self.search_products)
+        self.search_entry.pack(side='left', padx=(0, 10))
+        self.search_entry.insert(0, "Buscar productos...")
         
-        # Botón limpiar búsqueda
-        clear_search_btn = create_styled_button(
-            search_frame,
-            text="🗑️ Limpiar",
-            command=self.clear_search,
-            button_type='secondary',
-            width=10
+        # Botón de búsqueda
+        search_btn = tk.Button(
+            search_container,
+            text="🔍",
+            command=self.search_products,
+            font=('Segoe UI', 10),
+            bg=COLORS['primary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            cursor='hand2',
+            padx=15,
+            pady=5
         )
-        clear_search_btn.pack(side='left', padx=(10, 0))
+        search_btn.pack(side='left')
         
-        # Treeview para mostrar productos
-        columns = ('ID', 'Código', 'Nombre', 'Descripción', 'Precio', 'Stock', 'Stock Mín', 'Categoría')
-        self.products_tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=15)
+        # Área de la tabla
+        table_frame = tk.Frame(center_container, bg=COLORS['white'], relief='solid', bd=1)
+        table_frame.pack(fill='both', expand=True)
+        
+        # Crear Treeview
+        columns = ('ID', 'Código', 'Nombre', 'Descripción', 'Precio', 'Stock', 'Mínimo', 'Categoría')
+        self.products_tree = ttk.Treeview(
+            table_frame,
+            columns=columns,
+            show='headings',
+            height=15
+        )
         
         # Configurar columnas
-        for col in columns:
+        column_widths = [50, 80, 150, 200, 80, 60, 60, 100]
+        for i, col in enumerate(columns):
             self.products_tree.heading(col, text=col)
-            self.products_tree.column(col, width=120, anchor='center')
+            self.products_tree.column(col, width=column_widths[i], anchor='center')
         
-        # Scrollbar para el treeview
-        scrollbar = ttk.Scrollbar(main_frame, orient='vertical', command=self.products_tree.yview)
+        # Scrollbar para la tabla
+        scrollbar = ttk.Scrollbar(table_frame, orient='vertical', command=self.products_tree.yview)
         self.products_tree.configure(yscrollcommand=scrollbar.set)
         
-        # Pack treeview y scrollbar
-        self.products_tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+        # Empaquetar tabla y scrollbar
+        self.products_tree.pack(side='left', fill='both', expand=True, padx=20, pady=20)
+        scrollbar.pack(side='right', fill='y', pady=20)
         
-        # Bind doble clic para editar
-        self.products_tree.bind('<Double-1>', self.edit_selected_product)
+        # Configurar eventos
+        self.products_tree.bind('<Double-1>', lambda e: self.view_product_details())
+        self.search_entry.bind('<Return>', lambda e: self.search_products())
         
-        # Frame para estadísticas
-        stats_frame = create_styled_frame(main_frame, bg=COLORS['white'])
-        stats_frame.pack(fill='x', pady=(15, 0))
-        
-        # Mostrar estadísticas
-        self.show_inventory_stats(stats_frame)
-    
-    def show_inventory_stats(self, parent_frame):
-        """Mostrar estadísticas de inventario"""
-        try:
-            total_products = len(self.db.fetch_all("SELECT * FROM products"))
-            low_stock = len(self.db.fetch_all("SELECT * FROM products WHERE stock <= min_stock"))
-            total_value = sum([p['unit_price'] * p['stock'] for p in self.db.fetch_all("SELECT unit_price, stock FROM products")])
-            
-            stats_text = f"📊 Total Productos: {total_products} | ⚠️ Stock Bajo: {low_stock} | 💰 Valor Total: ${total_value:,.0f}"
-            stats_label = create_styled_label(
-                parent_frame,
-                text=stats_text,
-                font=FONTS['body'],
-                fg=COLORS['text_secondary'],
-                bg=COLORS['white']
-            )
-            stats_label.pack(side='left')
-        except:
-            pass
+        # Mostrar mensaje si no hay datos
+        self.show_inventory_stats(center_container)
     
     def load_products_async(self):
         """Cargar productos de forma asíncrona"""
         try:
-            # Obtener productos
             products = self.db.fetch_all("SELECT * FROM products ORDER BY name")
-            
-            # Si no hay productos, crear algunos de ejemplo
-            if not products:
-                self.create_sample_products()
-                products = self.db.fetch_all("SELECT * FROM products ORDER BY name")
-            
-            # Limpiar treeview
-            for item in self.products_tree.get_children():
-                self.products_tree.delete(item)
-            
-            # Insertar datos en lotes para mejor rendimiento
-            batch_size = 50
-            for i in range(0, len(products), batch_size):
-                batch = products[i:i + batch_size]
-                for product in batch:
-                    # Resaltar productos con stock bajo
-                    tags = []
-                    if product['stock'] <= product['min_stock']:
-                        tags = ['low_stock']
-                    
-                    self.products_tree.insert('', 'end', values=(
-                        product['id'],
-                        product['code'] or '',
-                        product['name'] or '',
-                        product['description'] or '',
-                        f"${product['unit_price']:,.0f}" if product['unit_price'] else '$0',
-                        product['stock'] or 0,
-                        product['min_stock'] or 0,
-                        product['category'] or ''
-                    ), tags=tags)
-                
-                # Actualizar interfaz cada lote
-                if i + batch_size < len(products):
-                    self.parent.update()
-            
-            # Configurar colores para stock bajo
-            self.products_tree.tag_configure('low_stock', background='#ffebee')
-            
-            self.data_loaded = True
-            self.show_inventory_stats()
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al cargar productos: {str(e)}")
-    
-    def load_products(self):
-        """Cargar productos en el treeview (método síncrono para compatibilidad)"""
-        if not self.data_loaded:
-            self.load_products_async()
-        else:
-            # Si ya están cargados, solo refrescar
-            self.load_products_async()
-    
-    def create_sample_products(self):
-        """Crear productos de ejemplo"""
-        sample_products = [
-            ('FILT001', 'Filtro de Aceite', 'Filtro de aceite para motor 1.6L', 'FILT001', 15000, 50, 10, 'Filtros'),
-            ('ACEI001', 'Aceite Motor 5W30', 'Aceite sintético 5W30 4L', 'ACEI001', 25000, 30, 5, 'Aceites'),
-            ('FREN001', 'Pastillas de Freno', 'Pastillas de freno delanteras', 'FREN001', 35000, 20, 5, 'Frenos'),
-            ('BATE001', 'Batería 12V 60Ah', 'Batería de auto 12V 60Ah', 'BATE001', 80000, 15, 3, 'Baterías'),
-            ('NEUM001', 'Neumático 185/65R15', 'Neumático radial 185/65R15', 'NEUM001', 45000, 8, 2, 'Neumáticos'),
-            ('AMOR001', 'Amortiguador Delantero', 'Amortiguador delantero izquierdo', 'AMOR001', 120000, 2, 5, 'Suspensión'),
-            ('DISK001', 'Disco de Freno', 'Disco de freno delantero', 'DISK001', 45000, 12, 3, 'Frenos'),
-            ('BOMB001', 'Bomba de Agua', 'Bomba de agua para motor', 'BOMB001', 65000, 5, 2, 'Motor')
-        ]
-        
-        for product_data in sample_products:
-            self.db.execute("""
-                INSERT INTO products (code, name, description, lot, unit_price, stock, min_stock, category, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (*product_data, datetime.now().isoformat()))
-    
-    def search_products(self, event=None):
-        """Buscar productos"""
-        search_term = self.product_search_entry.get().lower()
-        
-        for item in self.products_tree.get_children():
-            self.products_tree.delete(item)
-        
-        if not search_term:
-            self.load_products()
-            return
-        
-        try:
-            # Buscar productos
-            products = self.db.fetch_all("""
-                SELECT * FROM products 
-                WHERE LOWER(name) LIKE ? OR LOWER(code) LIKE ? OR LOWER(description) LIKE ? OR LOWER(category) LIKE ?
-                ORDER BY name
-            """, (f'%{search_term}%', f'%{search_term}%', f'%{search_term}%', f'%{search_term}%'))
+            self.products_tree.delete(*self.products_tree.get_children())
             
             for product in products:
+                # Formatear precio
+                price = f"${product['sale_price']:,.0f}" if product['sale_price'] else "$0"
+                
+                # Truncar descripción
+                description = product['description'][:50] + "..." if product['description'] and len(product['description']) > 50 else (product['description'] or "")
+                
+                # Determinar tags para colorear
                 tags = []
                 if product['stock'] <= product['min_stock']:
-                    tags = ['low_stock']
+                    tags.append('low_stock')
+                if product['stock'] == 0:
+                    tags.append('out_of_stock')
                 
                 self.products_tree.insert('', 'end', values=(
                     product['id'],
-                    product['code'] or '',
-                    product['name'] or '',
-                    product['description'] or '',
-                    f"${product['unit_price']:,.0f}" if product['unit_price'] else '$0',
-                    product['stock'] or 0,
-                    product['min_stock'] or 0,
+                    product['sku'] or '',
+                    product['name'],
+                    description,
+                    price,
+                    product['stock'],
+                    product['min_stock'],
                     product['category'] or ''
                 ), tags=tags)
+            
+            # Configurar colores de tags
+            self.products_tree.tag_configure('low_stock', background='#fff3cd')
+            self.products_tree.tag_configure('out_of_stock', background='#f8d7da')
+            
+            self.data_loaded = True
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al cargar productos: {str(e)}")
+    
+    def search_products(self):
+        """Buscar productos"""
+        try:
+            search_term = self.search_entry.get().strip()
+            if not search_term or search_term == "Buscar productos...":
+                self.load_products_async()
+                return
+            
+            # Buscar productos
+            products = self.db.fetch_all("""
+                SELECT * FROM products 
+                WHERE name LIKE ? OR sku LIKE ? OR category LIKE ? OR brand LIKE ?
+                ORDER BY name
+            """, (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", f"%{search_term}%"))
+            
+            self.products_tree.delete(*self.products_tree.get_children())
+            
+            for product in products:
+                price = f"${product['sale_price']:,.0f}" if product['sale_price'] else "$0"
+                description = product['description'][:50] + "..." if product['description'] and len(product['description']) > 50 else (product['description'] or "")
+                
+                tags = []
+                if product['stock'] <= product['min_stock']:
+                    tags.append('low_stock')
+                if product['stock'] == 0:
+                    tags.append('out_of_stock')
+                
+                self.products_tree.insert('', 'end', values=(
+                    product['id'],
+                    product['sku'] or '',
+                    product['name'],
+                    description,
+                    price,
+                    product['stock'],
+                    product['min_stock'],
+                    product['category'] or ''
+                ), tags=tags)
+            
         except Exception as e:
             messagebox.showerror("Error", f"Error al buscar productos: {str(e)}")
     
-    def clear_search(self):
-        """Limpiar búsqueda"""
-        self.product_search_entry.delete(0, tk.END)
-        self.load_products()
-    
     def show_product_form(self):
-        """Mostrar formulario para agregar producto"""
-        self.product_form_window = tk.Toplevel(self.parent)
-        self.product_form_window.title("Nuevo Producto")
-        self.product_form_window.geometry("600x700")
-        self.product_form_window.resizable(False, False)
+        """Mostrar formulario para agregar/editar producto"""
+        self.create_product_form()
+    
+    def create_product_form(self):
+        """Crear formulario para agregar producto"""
+        # Limpiar contenido
+        for widget in self.frame.winfo_children():
+            widget.destroy()
         
-        # Frame principal del formulario
-        form_frame = create_styled_frame(self.product_form_window, bg=COLORS['white'])
-        form_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        # Frame principal
+        main_frame = tk.Frame(self.frame, bg=COLORS['bg_primary'])
+        main_frame.pack(fill='both', expand=True)
         
-        # Título
-        title_label = create_styled_label(
-            form_frame,
-            text="📝 NUEVO PRODUCTO",
-            font=FONTS['heading'],
-            bg=COLORS['primary'],
-            fg='white'
+        # Contenedor centrado
+        center_container = tk.Frame(main_frame, bg=COLORS['bg_primary'])
+        center_container.place(relx=0.5, rely=0.5, anchor='center')
+        center_container.configure(width=600, height=700)
+        
+        # Header
+        header_frame = tk.Frame(center_container, bg=COLORS['primary'])
+        header_frame.pack(fill='x', pady=(0, 20))
+        
+        title_label = tk.Label(
+            header_frame,
+            text="➕ NUEVO PRODUCTO",
+            font=('Segoe UI', 16, 'bold'),
+            fg='white',
+            bg=COLORS['primary']
         )
-        title_label.pack(fill='x', pady=(0, 20))
+        title_label.pack(pady=10)
+        
+        subtitle_label = tk.Label(
+            header_frame,
+            text="Complete la información del producto",
+            font=('Segoe UI', 12),
+            fg='white',
+            bg=COLORS['primary']
+        )
+        subtitle_label.pack(pady=(0, 10))
+        
+        # Formulario
+        form_frame = tk.Frame(center_container, bg=COLORS['white'], relief='solid', bd=1)
+        form_frame.pack(fill='both', expand=True)
         
         # Campos del formulario
         fields = [
-            ('Código *', 'code'),
-            ('Nombre *', 'name'),
-            ('Descripción', 'description'),
-            ('Lote', 'lot'),
-            ('Precio Unitario *', 'unit_price'),
+            ('Nombre del Producto *', 'name'),
+            ('Código/SKU', 'sku'),
+            ('Categoría', 'category'),
+            ('Marca', 'brand'),
+            ('Precio de Compra', 'purchase_price'),
+            ('Precio de Venta', 'sale_price'),
             ('Stock Inicial', 'stock'),
             ('Stock Mínimo', 'min_stock'),
-            ('Stock Máximo', 'max_stock'),
-            ('Categoría', 'category')
+            ('Descripción', 'description')
         ]
         
-        self.form_entries = {}
+        self.form_vars = {}
         
-        for label_text, field_name in fields:
-            # Label
-            label = create_styled_label(
-                form_frame,
+        for i, (label_text, var_name) in enumerate(fields):
+            field_frame = tk.Frame(form_frame, bg=COLORS['white'])
+            field_frame.pack(fill='x', padx=20, pady=10)
+            
+            label = tk.Label(
+                field_frame,
                 text=label_text,
-                font=FONTS['body_bold'],
+                font=('Segoe UI', 10, 'bold'),
+                fg=COLORS['text_primary'],
                 bg=COLORS['white']
             )
-            label.pack(anchor='w', pady=(10, 5))
+            label.pack(anchor='w')
             
-            # Entry
-            entry = create_styled_entry(form_frame, width=50)
-            entry.pack(fill='x', pady=(0, 10))
-            self.form_entries[field_name] = entry
+            if var_name in ['description']:
+                # Text area para descripción
+                text_widget = tk.Text(
+                    field_frame,
+                    height=3,
+                    font=('Segoe UI', 10),
+                    bg='#f8f9fa',
+                    fg=COLORS['text_primary'],
+                    relief='solid',
+                    bd=1
+                )
+                text_widget.pack(fill='x', pady=(5, 0))
+                self.form_vars[var_name] = text_widget
+            else:
+                # Entry normal
+                entry = tk.Entry(
+                    field_frame,
+                    font=('Segoe UI', 10),
+                    bg='#f8f9fa',
+                    fg=COLORS['text_primary'],
+                    relief='solid',
+                    bd=1
+                )
+                entry.pack(fill='x', pady=(5, 0))
+                self.form_vars[var_name] = entry
         
         # Botones
-        button_frame = create_styled_frame(form_frame, bg=COLORS['white'])
-        button_frame.pack(fill='x', pady=(20, 0))
+        button_frame = tk.Frame(form_frame, bg=COLORS['white'])
+        button_frame.pack(fill='x', padx=20, pady=20)
         
-        save_btn = create_styled_button(
-            button_frame, 
+        save_btn = tk.Button(
+            button_frame,
             text="💾 Guardar Producto",
             command=self.save_product,
-            button_type='success',
-            width=20
+            font=('Segoe UI', 10, 'bold'),
+            bg=COLORS['success'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            cursor='hand2',
+            padx=20,
+            pady=8
         )
         save_btn.pack(side='left', padx=(0, 10))
         
-        cancel_btn = create_styled_button(
-            button_frame, 
-            text="❌ Cancelar", 
-            command=self.product_form_window.destroy,
-            button_type='secondary',
-            width=20
+        cancel_btn = tk.Button(
+            button_frame,
+            text="❌ Cancelar",
+            command=self.back_to_inventory,
+            font=('Segoe UI', 10, 'bold'),
+            bg=COLORS['secondary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            cursor='hand2',
+            padx=20,
+            pady=8
         )
         cancel_btn.pack(side='left')
     
     def save_product(self):
-        """Guardar producto en la base de datos"""
+        """Guardar nuevo producto"""
         try:
-            # Validar campos obligatorios
-            code = self.form_entries['code'].get().strip()
-            name = self.form_entries['name'].get().strip()
-            unit_price = self.form_entries['unit_price'].get().strip()
-            
-            if not code or not name or not unit_price:
-                messagebox.showerror("Error", "Código, nombre y precio son obligatorios")
-                return
-            
-            # Convertir precio a float
-            try:
-                unit_price = float(unit_price)
-            except ValueError:
-                messagebox.showerror("Error", "El precio debe ser un número válido")
+            # Validar campos requeridos
+            if not self.form_vars['name'].get().strip():
+                messagebox.showerror("Error", "El nombre del producto es obligatorio")
                 return
             
             # Obtener datos del formulario
-            description = self.form_entries['description'].get().strip()
-            lot = self.form_entries['lot'].get().strip()
-            stock = self.form_entries['stock'].get().strip() or '0'
-            min_stock = self.form_entries['min_stock'].get().strip() or '0'
-            max_stock = self.form_entries['max_stock'].get().strip() or '1000'
-            category = self.form_entries['category'].get().strip()
+            product_data = {
+                'name': self.form_vars['name'].get().strip(),
+                'sku': self.form_vars['sku'].get().strip() or None,
+                'category': self.form_vars['category'].get().strip() or None,
+                'brand': self.form_vars['brand'].get().strip() or None,
+                'purchase_price': float(self.form_vars['purchase_price'].get() or 0),
+                'sale_price': float(self.form_vars['sale_price'].get() or 0),
+                'stock': int(self.form_vars['stock'].get() or 0),
+                'min_stock': int(self.form_vars['min_stock'].get() or 0),
+                'description': self.form_vars['description'].get('1.0', tk.END).strip() or None,
+                'created_at': datetime.now().isoformat()
+            }
             
-            # Convertir números
-            try:
-                stock = int(stock)
-                min_stock = int(min_stock)
-                max_stock = int(max_stock)
-            except ValueError:
-                messagebox.showerror("Error", "Los valores de stock deben ser números enteros")
-                return
-            
-            # Insertar producto en la base de datos
+            # Insertar en la base de datos
             self.db.execute("""
-                INSERT INTO products (code, name, description, lot, unit_price, stock, min_stock, max_stock, category, created_at)
+                INSERT INTO products (name, sku, category, brand, purchase_price, 
+                                    sale_price, stock, min_stock, description, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (code, name, description, lot, unit_price, stock, min_stock, max_stock, category, datetime.now().isoformat()))
+            """, (
+                product_data['name'], product_data['sku'], product_data['category'],
+                product_data['brand'], product_data['purchase_price'], product_data['sale_price'],
+                product_data['stock'], product_data['min_stock'], product_data['description'],
+                product_data['created_at']
+            ))
             
-            messagebox.showinfo("Éxito", "Producto agregado correctamente")
-            self.product_form_window.destroy()
-            self.load_products()
+            messagebox.showinfo("Éxito", "Producto guardado correctamente")
+            self.back_to_inventory()
             
+        except ValueError as e:
+            messagebox.showerror("Error", "Verifique que los precios y stock sean números válidos")
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar producto: {str(e)}")
     
-    def edit_selected_product(self, event=None):
+    def back_to_inventory(self):
+        """Volver a la vista principal del inventario"""
+        self.create_widgets()
+        self.parent.after(100, self.load_products_async)
+    
+    def edit_selected_product(self):
         """Editar producto seleccionado"""
-        selection = self.products_tree.selection()
-        if not selection:
-            messagebox.showwarning("Advertencia", "Por favor seleccione un producto")
+        selected = self.products_tree.selection()
+        if not selected:
+            messagebox.showwarning("Advertencia", "Selecciona un producto para editar")
             return
-        
-        product_id = self.products_tree.item(selection[0])['values'][0]
-        
-        # Obtener datos del producto
-        product = self.db.fetch_one("SELECT * FROM products WHERE id = ?", (product_id,))
-        if not product:
-            messagebox.showerror("Error", "Producto no encontrado")
-            return
-        
-        # Mostrar formulario de edición
-        self.edit_product_form(product)
-    
-    def edit_product_form(self, product):
-        """Mostrar formulario para editar producto"""
-        self.edit_form_window = tk.Toplevel(self.parent)
-        self.edit_form_window.title("Editar Producto")
-        self.edit_form_window.geometry("600x700")
-        self.edit_form_window.resizable(False, False)
-        
-        # Frame principal del formulario
-        form_frame = create_styled_frame(self.edit_form_window, bg=COLORS['white'])
-        form_frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        # Título
-        title_label = create_styled_label(
-            form_frame,
-            text="✏️ EDITAR PRODUCTO",
-            font=FONTS['heading'],
-            bg=COLORS['primary'],
-            fg='white'
-        )
-        title_label.pack(fill='x', pady=(0, 20))
-        
-        # Campos del formulario
-        fields = [
-            ('Código *', 'code'),
-            ('Nombre *', 'name'),
-            ('Descripción', 'description'),
-            ('Lote', 'lot'),
-            ('Precio Unitario *', 'unit_price'),
-            ('Stock Inicial', 'stock'),
-            ('Stock Mínimo', 'min_stock'),
-            ('Stock Máximo', 'max_stock'),
-            ('Categoría', 'category')
-        ]
-        
-        self.edit_entries = {}
-        
-        for label_text, field_name in fields:
-            # Label
-            label = create_styled_label(
-                form_frame,
-                text=label_text,
-                font=FONTS['body_bold'],
-                bg=COLORS['white']
-            )
-            label.pack(anchor='w', pady=(10, 5))
-            
-            # Entry con valor actual
-            entry = create_styled_entry(form_frame, width=50)
-            entry.insert(0, str(product[field_name]) if product[field_name] is not None else '')
-            entry.pack(fill='x', pady=(0, 10))
-            self.edit_entries[field_name] = entry
-        
-        # Botones
-        button_frame = create_styled_frame(form_frame, bg=COLORS['white'])
-        button_frame.pack(fill='x', pady=(20, 0))
-        
-        save_btn = create_styled_button(
-            button_frame,
-            text="💾 Actualizar Producto",
-            command=lambda: self.update_product(product['id']),
-            button_type='success',
-            width=20
-        )
-        save_btn.pack(side='left', padx=(0, 10))
-        
-        cancel_btn = create_styled_button(
-            button_frame,
-            text="❌ Cancelar",
-            command=self.edit_form_window.destroy,
-            button_type='secondary',
-            width=20
-        )
-        cancel_btn.pack(side='left')
-    
-    def update_product(self, product_id):
-        """Actualizar producto en la base de datos"""
-        try:
-            # Validar campos obligatorios
-            code = self.edit_entries['code'].get().strip()
-            name = self.edit_entries['name'].get().strip()
-            unit_price = self.edit_entries['unit_price'].get().strip()
-            
-            if not code or not name or not unit_price:
-                messagebox.showerror("Error", "Código, nombre y precio son obligatorios")
-                return
-            
-            # Convertir precio a float
-            try:
-                unit_price = float(unit_price)
-            except ValueError:
-                messagebox.showerror("Error", "El precio debe ser un número válido")
-                return
-            
-            # Obtener datos del formulario
-            description = self.edit_entries['description'].get().strip()
-            lot = self.edit_entries['lot'].get().strip()
-            stock = self.edit_entries['stock'].get().strip() or '0'
-            min_stock = self.edit_entries['min_stock'].get().strip() or '0'
-            max_stock = self.edit_entries['max_stock'].get().strip() or '1000'
-            category = self.edit_entries['category'].get().strip()
-            
-            # Convertir números
-            try:
-                stock = int(stock)
-                min_stock = int(min_stock)
-                max_stock = int(max_stock)
-            except ValueError:
-                messagebox.showerror("Error", "Los valores de stock deben ser números enteros")
-                return
-            
-            # Actualizar producto en la base de datos
-            self.db.execute("""
-                UPDATE products 
-                SET code = ?, name = ?, description = ?, lot = ?, unit_price = ?, stock = ?, min_stock = ?, max_stock = ?, category = ?
-                WHERE id = ?
-            """, (code, name, description, lot, unit_price, stock, min_stock, max_stock, category, product_id))
-            
-            messagebox.showinfo("Éxito", "Producto actualizado correctamente")
-            self.edit_form_window.destroy()
-            self.load_products()
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al actualizar producto: {str(e)}")
+        messagebox.showinfo("Información", "Editar producto - En desarrollo")
     
     def delete_selected_product(self):
         """Eliminar producto seleccionado"""
-        selection = self.products_tree.selection()
-        if not selection:
-            messagebox.showwarning("Advertencia", "Por favor seleccione un producto")
+        selected = self.products_tree.selection()
+        if not selected:
+            messagebox.showwarning("Advertencia", "Selecciona un producto para eliminar")
             return
         
-        product_id = self.products_tree.item(selection[0])['values'][0]
-        product_name = self.products_tree.item(selection[0])['values'][2]
-        
         # Confirmar eliminación
-        if messagebox.askyesno("Confirmar", f"¿Está seguro de eliminar el producto {product_name}?"):
+        item = self.products_tree.item(selected[0])
+        product_name = item['values'][2]  # Nombre está en la columna 2
+        
+        if messagebox.askyesno("Confirmar", f"¿Estás seguro de eliminar el producto '{product_name}'?"):
             try:
-                # Eliminar producto de la base de datos
+                product_id = item['values'][0]
                 self.db.execute("DELETE FROM products WHERE id = ?", (product_id,))
-                
                 messagebox.showinfo("Éxito", "Producto eliminado correctamente")
-                self.load_products()
-                
+                self.load_products_async()
             except Exception as e:
                 messagebox.showerror("Error", f"Error al eliminar producto: {str(e)}")
     
     def view_product_details(self):
         """Ver detalles del producto seleccionado"""
-        selection = self.products_tree.selection()
-        if not selection:
-            messagebox.showwarning("Advertencia", "Por favor seleccione un producto")
+        selected = self.products_tree.selection()
+        if not selected:
+            messagebox.showwarning("Advertencia", "Selecciona un producto para ver detalles")
             return
-        
-        product_id = self.products_tree.item(selection[0])['values'][0]
-        product_name = self.products_tree.item(selection[0])['values'][2]
-        
-        # Obtener datos del producto
-        product = self.db.fetch_one("SELECT * FROM products WHERE id = ?", (product_id,))
-        if not product:
-            messagebox.showerror("Error", "Producto no encontrado")
-            return
-        
-        # Mostrar ventana de detalles
-        details_window = tk.Toplevel(self.parent)
-        details_window.title(f"Detalles - {product_name}")
-        details_window.geometry("500x600")
-        details_window.resizable(False, False)
-        
-        # Frame principal
-        details_frame = create_styled_frame(details_window, bg=COLORS['white'])
-        details_frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        # Título
-        title_label = create_styled_label(
-            details_frame,
-            text=f"📦 DETALLES DE {product_name.upper()}",
-            font=FONTS['heading'],
-            bg=COLORS['primary'],
-            fg='white'
-        )
-        title_label.pack(fill='x', pady=(0, 20))
-        
-        # Mostrar información
-        stock_status = "⚠️ STOCK BAJO" if product['stock'] <= product['min_stock'] else "✅ Stock OK"
-        stock_color = COLORS['error'] if product['stock'] <= product['min_stock'] else COLORS['success']
-        
-        info_text = f"""
-📋 INFORMACIÓN DEL PRODUCTO:
-• Código: {product['code'] or 'No especificado'}
-• Nombre: {product['name'] or 'No especificado'}
-• Descripción: {product['description'] or 'No especificado'}
-• Lote: {product['lot'] or 'No especificado'}
-
-💰 INFORMACIÓN COMERCIAL:
-• Precio Unitario: ${product['unit_price']:,.0f} if product['unit_price'] else 'No especificado'
-• Categoría: {product['category'] or 'No especificado'}
-
-📊 CONTROL DE STOCK:
-• Stock Actual: {product['stock'] or 0} unidades
-• Stock Mínimo: {product['min_stock'] or 0} unidades
-• Stock Máximo: {product['max_stock'] or 0} unidades
-• Estado: {stock_status}
-
-📅 FECHA DE REGISTRO:
-• {product['created_at'] or 'No especificado'}
-        """
-        
-        info_label = create_styled_label(
-            details_frame,
-            text=info_text,
-            font=FONTS['body'],
-            fg=COLORS['text_primary'],
-            bg=COLORS['white'],
-            justify='left'
-        )
-        info_label.pack(fill='both', expand=True, pady=(0, 20))
-        
-        # Botón cerrar
-        close_btn = create_styled_button(
-            details_frame,
-            text="❌ Cerrar",
-            command=details_window.destroy,
-            button_type='secondary',
-            width=15
-        )
-        close_btn.pack()
+        messagebox.showinfo("Información", "Ver detalles - En desarrollo")
     
     def import_excel(self):
-        """Importar productos desde archivo Excel"""
+        """Importar productos desde Excel"""
+        messagebox.showinfo("Información", "Importar Excel - En desarrollo")
+    
+    def show_inventory_stats(self, parent):
+        """Mostrar estadísticas del inventario"""
         try:
-            # Abrir diálogo para seleccionar archivo
-            file_path = filedialog.askopenfilename(
-                title="Seleccionar archivo Excel",
-                filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
-            )
+            # Obtener estadísticas
+            total_products = len(self.db.fetch_all("SELECT * FROM products"))
+            low_stock = len(self.db.fetch_all("SELECT * FROM products WHERE stock <= min_stock"))
+            out_of_stock = len(self.db.fetch_all("SELECT * FROM products WHERE stock = 0"))
             
-            if not file_path:
-                return
-            
-            # Leer archivo Excel
-            df = pd.read_excel(file_path)
-            
-            # Validar columnas requeridas
-            required_columns = ['codigo', 'nombre', 'precio']
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            
-            if missing_columns:
-                messagebox.showerror("Error", f"El archivo Excel debe contener las columnas: {', '.join(missing_columns)}")
-                return
-            
-            # Procesar cada fila
-            imported_count = 0
-            for index, row in df.iterrows():
-                try:
-                    # Obtener datos de la fila
-                    code = str(row['codigo']).strip()
-                    name = str(row['nombre']).strip()
-                    price = float(row['precio'])
-                    
-                    # Campos opcionales
-                    description = str(row.get('descripcion', '')).strip()
-                    lot = str(row.get('lote', '')).strip()
-                    stock = int(row.get('stock', 0))
-                    min_stock = int(row.get('stock_minimo', 0))
-                    max_stock = int(row.get('stock_maximo', 1000))
-                    category = str(row.get('categoria', '')).strip()
-                    
-                    # Insertar producto
-                    self.db.execute("""
-                        INSERT OR REPLACE INTO products (code, name, description, lot, unit_price, stock, min_stock, max_stock, category, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (code, name, description, lot, price, stock, min_stock, max_stock, category, datetime.now().isoformat()))
-                    
-                    imported_count += 1
-                    
-                except Exception as e:
-                    print(f"Error procesando fila {index + 1}: {e}")
-                    continue
-            
-            messagebox.showinfo("Éxito", f"Se importaron {imported_count} productos correctamente")
-            self.load_products()
+            # Mostrar mensaje si no hay productos
+            if total_products == 0:
+                no_data_label = tk.Label(
+                    parent,
+                    text="No hay productos registrados - Agrega productos para comenzar",
+                    font=('Segoe UI', 12),
+                    fg=COLORS['text_muted'],
+                    bg=COLORS['bg_primary']
+                )
+                no_data_label.place(relx=0.5, rely=0.5, anchor='center')
             
         except Exception as e:
-            messagebox.showerror("Error", f"Error al importar archivo Excel: {str(e)}")
-    
-    def show_remainders(self):
-        """Mostrar módulo de sobrantes"""
-        from .remainders import RemaindersModule
-        
-        # Crear ventana para sobrantes
-        remainders_window = tk.Toplevel(self.frame)
-        remainders_window.title("Gestión de Sobrantes")
-        remainders_window.geometry("1000x600")
-        remainders_window.configure(bg=COLORS['white'])
-        
-        # Centrar ventana
-        remainders_window.update_idletasks()
-        x = (remainders_window.winfo_screenwidth() // 2) - (1000 // 2)
-        y = (remainders_window.winfo_screenheight() // 2) - (600 // 2)
-        remainders_window.geometry(f"1000x600+{x}+{y}")
-        
-        # Crear módulo de sobrantes
-        remainders_module = RemaindersModule(remainders_window, self.db, self.user_role)
-        remainders_module.frame.pack(fill='both', expand=True)
-    
-    def show_analytics(self):
-        """Mostrar módulo de análisis"""
-        from .analytics import AnalyticsModule
-        
-        # Crear ventana para análisis
-        analytics_window = tk.Toplevel(self.frame)
-        analytics_window.title("Análisis de Productos")
-        analytics_window.geometry("1200x700")
-        analytics_window.configure(bg=COLORS['white'])
-        
-        # Centrar ventana
-        analytics_window.update_idletasks()
-        x = (analytics_window.winfo_screenwidth() // 2) - (1200 // 2)
-        y = (analytics_window.winfo_screenheight() // 2) - (700 // 2)
-        analytics_window.geometry(f"1200x700+{x}+{y}")
-        
-        # Crear módulo de análisis
-        analytics_module = AnalyticsModule(analytics_window, self.db, self.user_role)
-        analytics_module.frame.pack(fill='both', expand=True)
-    
-    def export_excel(self):
-        """Exportar productos a archivo Excel"""
-        try:
-            # Obtener todos los productos
-            products = self.db.fetch_all("SELECT * FROM products ORDER BY name")
-            
-            if not products:
-                messagebox.showwarning("Advertencia", "No hay productos para exportar")
-                return
-            
-            # Crear DataFrame
-            data = []
-            for product in products:
-                data.append({
-                    'ID': product['id'],
-                    'Código': product['code'],
-                    'Nombre': product['name'],
-                    'Descripción': product['description'],
-                    'Lote': product['lot'],
-                    'Precio': product['unit_price'],
-                    'Stock': product['stock'],
-                    'Stock Mínimo': product['min_stock'],
-                    'Stock Máximo': product['max_stock'],
-                    'Categoría': product['category'],
-                    'Fecha Creación': product['created_at']
-                })
-            
-            df = pd.DataFrame(data)
-            
-            # Abrir diálogo para guardar archivo
-            file_path = filedialog.asksaveasfilename(
-                title="Guardar archivo Excel",
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
-            )
-            
-            if not file_path:
-                return
-            
-            # Guardar archivo
-            df.to_excel(file_path, index=False)
-            
-            messagebox.showinfo("Éxito", f"Se exportaron {len(products)} productos a {file_path}")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al exportar archivo Excel: {str(e)}")
+            print(f"Error mostrando estadísticas: {e}")

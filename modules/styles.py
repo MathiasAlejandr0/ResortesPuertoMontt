@@ -2,146 +2,109 @@ import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkFont
 
-# Paleta de colores institucional - Resortes Puerto Montt
+# Paleta de colores institucional moderna - Resortes Puerto Montt 2025
 COLORS = {
-    # Colores institucionales exactos
-    'primary': '#a51611',       # Rojo bermellón institucional
-    'secondary': '#070607',     # Negro institucional exacto
-    'accent': '#a51611',        # Rojo bermellón para acentos
-    'success': '#00C853',       # Verde para éxito
-    'warning': '#FFB300',       # Amarillo para advertencias
-    'danger': '#a51611',        # Rojo bermellón para peligro
-    'info': '#070607',          # Negro para información
+    # Colores institucionales principales
+    'primary': '#A51611',       # Rojo bermellón oscuro
+    'primary_light': '#C41E3A', # Rojo bermellón claro
+    'primary_dark': '#8B0000',  # Rojo bermellón muy oscuro
+    'secondary': '#2C3E50',     # Azul marino elegante
+    'secondary_light': '#34495E', # Azul marino claro
+    'accent': '#F39C12',        # Naranja dorado
+    'accent_light': '#F7DC6F',  # Amarillo suave
     
-    # Colores de fondo institucionales
-    'bg_primary': '#FBFAF6',    # Blanco institucional exacto
-    'bg_secondary': '#F5F4F0',  # Blanco ligeramente más oscuro
-    'bg_tertiary': '#EEEDE9',   # Gris muy claro basado en blanco institucional
-    'white': '#FBFAF6',         # Blanco institucional
-    'light_gray': '#F8F7F3',    # Gris muy claro institucional
+    # Colores de estado modernos
+    'success': '#28A745',       # Verde éxito
+    'success_light': '#D4EDDA', # Verde claro
+    'warning': '#FFC107',       # Amarillo advertencia
+    'warning_light': '#FFF3CD', # Amarillo claro
+    'danger': '#DC3545',        # Rojo peligro
+    'danger_light': '#F8D7DA',  # Rojo claro
+    'info': '#17A2B8',          # Azul información
+    'info_light': '#D1ECF1',    # Azul claro
     
-    # Colores de texto institucionales
-    'text_primary': '#070607',  # Negro institucional para texto
-    'text_secondary': '#666666', # Gris medio para texto secundario
-    'text_light': '#FBFAF6',    # Blanco institucional para texto claro
-    'text_muted': '#999999',    # Gris apagado
+    # Colores de fondo modernos
+    'bg_primary': '#F8F9FA',    # Blanco suave
+    'bg_secondary': '#E9ECEF',  # Gris muy claro
+    'bg_tertiary': '#DEE2E6',   # Gris claro
+    'bg_dark': '#212529',       # Gris oscuro
+    'white': '#FFFFFF',         # Blanco puro
+    'light_gray': '#F1F3F4',    # Gris muy claro
+    'card_bg': '#FFFFFF',       # Fondo de tarjetas
     
-    # Colores de borde institucionales
-    'border': '#E0DFDB',        # Borde claro basado en blanco institucional
-    'border_dark': '#BDBCB8',   # Borde oscuro
+    # Colores de texto jerárquicos
+    'text_primary': '#212529',  # Texto principal
+    'text_secondary': '#6C757D', # Texto secundario
+    'text_muted': '#ADB5BD',    # Texto atenuado
+    'text_light': '#FFFFFF',    # Texto claro
+    'text_dark': '#000000',     # Texto oscuro
     
-    # Colores de hover institucionales
-    'hover_primary': '#E6200F',  # Rojo más oscuro para hover
-    'hover_success': '#00A847',
-    'hover_warning': '#FF8F00',
-    'hover_danger': '#E6200F',
-    'hover_info': '#050405',
-    'hover_secondary': '#050405',
-    
-    # Gradientes institucionales
-    'gradient_start': '#a51611',
-    'gradient_end': '#E6200F',
-    'card_shadow': '#E0DFDB'
+    # Colores de bordes y sombras
+    'border': '#E9ECEF',        # Borde claro
+    'border_light': '#E9ECEF',  # Borde muy claro
+    'border_medium': '#DEE2E6', # Borde medio
+    'border_dark': '#ADB5BD',   # Borde oscuro
+    'card_shadow': '#E0DFDB',   # Sombra de tarjetas
 }
 
-# Fuentes modernas
+# Tipografía moderna y jerárquica
 FONTS = {
-    'title': ('Segoe UI', 24, 'bold'),
     'heading': ('Segoe UI', 18, 'bold'),
+    'title': ('Segoe UI', 16, 'bold'),
     'subtitle': ('Segoe UI', 14, 'bold'),
     'body': ('Segoe UI', 11),
     'body_bold': ('Segoe UI', 11, 'bold'),
     'small': ('Segoe UI', 9),
-    'button': ('Segoe UI', 10, 'bold')
+    'small_bold': ('Segoe UI', 9, 'bold'),
+    'button': ('Segoe UI', 11, 'bold'),
+    'caption': ('Segoe UI', 10),
 }
 
-def apply_styles(root):
-    """Aplicar estilos globales a la aplicación"""
-    style = ttk.Style()
-    
-    # Configurar tema
-    style.theme_use('clam')
-    
-    # Configurar estilos para Treeview
-    style.configure('Treeview',
-        background=COLORS['white'],
-        foreground=COLORS['text_primary'],
-        fieldbackground=COLORS['white'],
-        borderwidth=1,
-        font=FONTS['body']
-    )
-    
-    style.configure('Treeview.Heading',
-        background=COLORS['primary'],
-        foreground=COLORS['text_light'],
-        font=FONTS['body_bold'],
-        relief='flat'
-    )
-    
-    style.map('Treeview.Heading',
-        background=[('active', COLORS['accent'])]
-    )
-    
-    # Configurar estilos para Combobox
-    style.configure('TCombobox',
-        fieldbackground=COLORS['white'],
-        background=COLORS['white'],
-        borderwidth=1,
-        font=FONTS['body']
-    )
-    
-    # Configurar estilos para Entry
-    style.configure('TEntry',
-        fieldbackground=COLORS['white'],
-        borderwidth=1,
-        font=FONTS['body']
-    )
-
-def create_styled_button(parent, text, command=None, button_type='primary', width=None, height=None, **kwargs):
-    """Crear botón con estilo moderno"""
-    # Configurar colores según el tipo
-    color_config = {
+def create_styled_button(parent, text, command=None, button_type='primary', 
+                        width=None, height=None, **kwargs):
+    """Crear botón con estilo moderno y estable"""
+    # Configuración de colores por tipo
+    button_configs = {
         'primary': {
             'bg': COLORS['primary'],
             'fg': COLORS['text_light'],
-            'active_bg': COLORS['hover_primary'],
-            'active_fg': COLORS['text_light']
-        },
-        'success': {
-            'bg': COLORS['success'],
-            'fg': COLORS['text_light'],
-            'active_bg': COLORS['hover_success'],
-            'active_fg': COLORS['text_light']
-        },
-        'warning': {
-            'bg': COLORS['warning'],
-            'fg': COLORS['text_light'],
-            'active_bg': COLORS['hover_warning'],
-            'active_fg': COLORS['text_light']
-        },
-        'danger': {
-            'bg': COLORS['danger'],
-            'fg': COLORS['text_light'],
-            'active_bg': COLORS['hover_danger'],
-            'active_fg': COLORS['text_light']
-        },
-        'info': {
-            'bg': COLORS['info'],
-            'fg': COLORS['text_light'],
-            'active_bg': COLORS['hover_info'],
-            'active_fg': COLORS['text_light']
+            'activebackground': COLORS['primary_dark'],
+            'activeforeground': COLORS['text_light']
         },
         'secondary': {
             'bg': COLORS['secondary'],
             'fg': COLORS['text_light'],
-            'active_bg': COLORS['hover_secondary'],
-            'active_fg': COLORS['text_light']
+            'activebackground': COLORS['secondary_light'],
+            'activeforeground': COLORS['text_light']
+        },
+        'success': {
+            'bg': COLORS['success'],
+            'fg': COLORS['text_light'],
+            'activebackground': '#218838',
+            'activeforeground': COLORS['text_light']
+        },
+        'warning': {
+            'bg': COLORS['warning'],
+            'fg': COLORS['text_dark'],
+            'activebackground': '#E0A800',
+            'activeforeground': COLORS['text_dark']
+        },
+        'danger': {
+            'bg': COLORS['danger'],
+            'fg': COLORS['text_light'],
+            'activebackground': '#C82333',
+            'activeforeground': COLORS['text_light']
+        },
+        'info': {
+            'bg': COLORS['info'],
+            'fg': COLORS['text_light'],
+            'activebackground': '#138496',
+            'activeforeground': COLORS['text_light']
         }
     }
     
-    config = color_config.get(button_type, color_config['primary'])
+    config = button_configs.get(button_type, button_configs['primary'])
     
-    # Crear botón con estilo moderno
     button = tk.Button(
         parent,
         text=text,
@@ -149,26 +112,15 @@ def create_styled_button(parent, text, command=None, button_type='primary', widt
         font=FONTS['button'],
         bg=config['bg'],
         fg=config['fg'],
-        activebackground=config['active_bg'],
-        activeforeground=config['active_fg'],
-        relief='flat',
-        bd=0,
-        padx=15,
-        pady=8,
+        activebackground=config['activebackground'],
+        activeforeground=config['activeforeground'],
+        relief='solid',
+        bd=1,
         cursor='hand2',
         width=width,
-        height=height
+        height=height,
+        **kwargs
     )
-    
-    # Agregar efecto hover
-    def on_enter(e):
-        button.config(bg=config['active_bg'])
-    
-    def on_leave(e):
-        button.config(bg=config['bg'])
-    
-    button.bind('<Enter>', on_enter)
-    button.bind('<Leave>', on_leave)
     
     return button
 
@@ -183,8 +135,12 @@ def create_styled_label(parent, text, font=None, bg=None, fg=None, **kwargs):
         **kwargs
     )
 
-def create_styled_entry(parent, width=None, **kwargs):
+def create_styled_entry(parent, width=None, placeholder=None, **kwargs):
     """Crear campo de entrada con estilo moderno"""
+    # Remover placeholder de kwargs si existe
+    if 'placeholder' in kwargs:
+        placeholder = kwargs.pop('placeholder')
+    
     entry = tk.Entry(
         parent,
         font=FONTS['body'],
@@ -193,18 +149,27 @@ def create_styled_entry(parent, width=None, **kwargs):
         relief='solid',
         bd=1,
         width=width,
+        highlightthickness=0,
         **kwargs
     )
     
-    # Agregar efecto focus
-    def on_focus_in(e):
-        entry.config(highlightthickness=2, highlightcolor=COLORS['accent'])
-    
-    def on_focus_out(e):
-        entry.config(highlightthickness=0)
-    
-    entry.bind('<FocusIn>', on_focus_in)
-    entry.bind('<FocusOut>', on_focus_out)
+    # Implementar placeholder si se proporciona
+    if placeholder:
+        entry.insert(0, placeholder)
+        entry.configure(fg=COLORS['text_muted'])
+        
+        def on_focus_in(event):
+            if entry.get() == placeholder:
+                entry.delete(0, tk.END)
+                entry.configure(fg=COLORS['text_primary'])
+        
+        def on_focus_out(event):
+            if not entry.get():
+                entry.insert(0, placeholder)
+                entry.configure(fg=COLORS['text_muted'])
+        
+        entry.bind('<FocusIn>', on_focus_in)
+        entry.bind('<FocusOut>', on_focus_out)
     
     return entry
 
@@ -219,78 +184,50 @@ def create_styled_frame(parent, bg=None, **kwargs):
     )
 
 def create_card_frame(parent, title=None, card_type='primary', **kwargs):
-    """Crear frame tipo tarjeta moderna con diseño 2025"""
-    # Frame principal de la tarjeta con sombra
+    """Crear frame tipo tarjeta moderna"""
+    # Frame principal de la tarjeta
     card_container = tk.Frame(parent, bg=COLORS['bg_primary'])
     
-    # Frame de la tarjeta con colores según tipo
-    card_colors = {
-        'primary': COLORS['primary'],
-        'success': COLORS['success'],
-        'warning': COLORS['warning'],
-        'info': COLORS['info'],
-        'accent': COLORS['accent']
-    }
-    
-    card_color = card_colors.get(card_type, COLORS['primary'])
-    
-    # Sombra de la tarjeta
-    shadow = tk.Frame(
-        card_container,
-        bg=COLORS['card_shadow'],
-        height=2
-    )
-    shadow.pack(fill='x', pady=(2, 0))
-    
-    # Tarjeta principal
-    card = tk.Frame(
+    # Frame de la tarjeta
+    card_frame = tk.Frame(
         card_container,
         bg=COLORS['white'],
-        relief='flat',
-        bd=0,
-        **kwargs
+        relief='solid',
+        bd=1,
+        highlightbackground=COLORS['border_light'],
+        highlightthickness=1
     )
-    card.pack(fill='both', expand=True)
+    card_frame.pack(fill='both', expand=True, padx=2, pady=2)
     
-    # Header colorido de la tarjeta
-    header = tk.Frame(
-        card,
-        bg=card_color,
-        height=4
-    )
-    header.pack(fill='x')
-    header.pack_propagate(False)
-    
-    # Contenido de la tarjeta
-    content = tk.Frame(
-        card,
-        bg=COLORS['white']
-    )
-    content.pack(fill='both', expand=True, padx=15, pady=15)
-    
-    # Agregar título si se proporciona
+    # Header si se especifica título
     if title:
-        title_label = create_styled_label(
-            content,
+        header_frame = tk.Frame(card_frame, bg=COLORS['primary'], height=40)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        title_label = tk.Label(
+            header_frame,
             text=title,
             font=FONTS['subtitle'],
-            fg=COLORS['text_primary'],
-            bg=COLORS['white']
+            fg=COLORS['text_light'],
+            bg=COLORS['primary']
         )
-        title_label.pack(anchor='w', pady=(0, 10))
+        title_label.pack(expand=True, fill='both', padx=15, pady=8)
     
-    return card_container, content
+    return card_container, card_frame
 
-def create_modern_header(parent, title, subtitle=None, icon=None):
-    """Crear header moderno con título y subtítulo"""
-    header = create_styled_frame(parent, bg=COLORS['primary'])
+def create_modern_header(parent, title, subtitle=None, **kwargs):
+    """Crear header moderno para módulos"""
+    header_frame = tk.Frame(parent, bg=COLORS['primary'], height=80)
+    header_frame.pack(fill='x')
+    header_frame.pack_propagate(False)
     
-    # Frame para el contenido del header
-    content_frame = create_styled_frame(header, bg=COLORS['primary'])
-    content_frame.pack(fill='x', padx=20, pady=15)
+    # Contenido del header
+    content_frame = tk.Frame(header_frame, bg=COLORS['primary'])
+    content_frame.pack(expand=True, fill='both', padx=20, pady=15)
     
     # Título principal
-    title_label = create_styled_label(
+    title_label = tk.Label(
         content_frame,
         text=title,
         font=FONTS['heading'],
@@ -301,7 +238,7 @@ def create_modern_header(parent, title, subtitle=None, icon=None):
     
     # Subtítulo si se proporciona
     if subtitle:
-        subtitle_label = create_styled_label(
+        subtitle_label = tk.Label(
             content_frame,
             text=subtitle,
             font=FONTS['body'],
@@ -310,92 +247,98 @@ def create_modern_header(parent, title, subtitle=None, icon=None):
         )
         subtitle_label.pack(anchor='w', pady=(5, 0))
     
-    return header
+    return header_frame
 
 def create_action_buttons(parent, buttons_config):
-    """Crear fila de botones de acción con estilo moderno"""
-    button_frame = create_styled_frame(parent, bg=COLORS['white'])
+    """Crear botones de acción en fila"""
+    button_frame = tk.Frame(parent, bg=COLORS['white'])
     
-    for i, (text, command, button_type, icon) in enumerate(buttons_config):
+    for text, command, button_type, icon in buttons_config:
         btn = create_styled_button(
             button_frame,
             text=f"{icon} {text}",
             command=command,
             button_type=button_type,
-            width=15
+            width=15,
+            height=2
         )
-        btn.pack(side='left', padx=(0, 10) if i < len(buttons_config) - 1 else 0)
+        btn.pack(side='left', padx=5)
     
     return button_frame
 
-def create_search_bar(parent, placeholder="Buscar...", command=None):
+def create_search_bar(parent, placeholder, callback):
     """Crear barra de búsqueda moderna"""
-    search_frame = create_styled_frame(parent, bg=COLORS['white'])
+    search_frame = tk.Frame(parent, bg=COLORS['white'])
     
-    # Icono de búsqueda
-    search_icon = create_styled_label(
+    # Label de búsqueda
+    search_label = tk.Label(
         search_frame,
         text="🔍",
         font=FONTS['body'],
         bg=COLORS['white']
     )
-    search_icon.pack(side='left', padx=(0, 10))
+    search_label.pack(side='left', padx=(0, 10))
     
     # Campo de búsqueda
-    search_entry = create_styled_entry(
+    search_entry = tk.Entry(
         search_frame,
-        width=50
+        font=FONTS['body'],
+        bg=COLORS['white'],
+        fg=COLORS['text_primary'],
+        relief='solid',
+        bd=1,
+        width=40
     )
     search_entry.pack(side='left', padx=(0, 10))
-    
-    if command:
-        search_entry.bind('<KeyRelease>', command)
+    search_entry.insert(0, placeholder)
+    search_entry.bind('<KeyRelease>', callback)
     
     # Botón limpiar
     clear_btn = create_styled_button(
         search_frame,
-        text="🗑️ Limpiar",
-        command=lambda: search_entry.delete(0, tk.END),
+        text="🗑️",
+        command=lambda: (search_entry.delete(0, tk.END), callback()),
         button_type='secondary',
-        width=10
+        width=3
     )
-    clear_btn.pack(side='left', padx=(10, 0))
+    clear_btn.pack(side='left')
     
     return search_frame, search_entry
 
 def create_stats_bar(parent, stats_data):
-    """Crear barra de estadísticas moderna"""
-    stats_frame = create_styled_frame(parent, bg=COLORS['light_gray'])
+    """Crear barra de estadísticas"""
+    stats_frame = tk.Frame(parent, bg=COLORS['white'])
     
-    for i, (icon, label, value) in enumerate(stats_data):
-        stat_frame = create_styled_frame(stats_frame, bg=COLORS['light_gray'])
-        stat_frame.pack(side='left', padx=(0, 30) if i < len(stats_data) - 1 else 0)
+    for icon, label, value in stats_data:
+        stat_frame = tk.Frame(stats_frame, bg=COLORS['white'])
+        stat_frame.pack(side='left', padx=20, pady=10)
         
-        # Icono
-        icon_label = create_styled_label(
+        # Icono y valor
+        value_label = tk.Label(
             stat_frame,
-            text=icon,
-            font=FONTS['body'],
-            bg=COLORS['light_gray']
+            text=f"{icon} {value}",
+            font=FONTS['title'],
+            fg=COLORS['primary'],
+            bg=COLORS['white']
         )
-        icon_label.pack(side='left', padx=(0, 5))
+        value_label.pack()
         
-        # Texto
-        text_label = create_styled_label(
+        # Etiqueta
+        label_widget = tk.Label(
             stat_frame,
-            text=f"{label}: {value}",
+            text=label,
             font=FONTS['body'],
             fg=COLORS['text_secondary'],
-            bg=COLORS['light_gray']
+            bg=COLORS['white']
         )
-        text_label.pack(side='left')
+        label_widget.pack()
     
     return stats_frame
 
-def create_modern_treeview(parent, columns, height=15):
-    """Crear Treeview moderno"""
-    # Frame para el Treeview y scrollbar
-    tree_frame = create_styled_frame(parent, bg=COLORS['white'])
+def create_modern_treeview(parent, columns, height=10):
+    """Crear treeview moderno"""
+    # Frame contenedor
+    tree_frame = tk.Frame(parent, bg=COLORS['white'])
     
     # Treeview
     tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=height)
@@ -415,121 +358,15 @@ def create_modern_treeview(parent, columns, height=15):
     
     return tree_frame, tree
 
-def create_modern_card_with_stats(parent, title, stats_data, card_type='primary', image_placeholder=None):
-    """Crear tarjeta moderna con estadísticas siguiendo el patrón de diseño 2025"""
-    # Contenedor principal de la tarjeta
-    card_container = tk.Frame(parent, bg=COLORS['bg_primary'])
+def create_centered_content(parent, max_width=800, bg_color=COLORS['bg_primary']):
+    """Crear contenido centrado con ancho máximo"""
+    # Frame principal
+    main_frame = create_styled_frame(parent, bg=bg_color)
+    main_frame.pack(fill='both', expand=True)
     
-    # Colores según tipo de tarjeta
-    card_colors = {
-        'primary': COLORS['primary'],
-        'success': COLORS['success'], 
-        'warning': COLORS['warning'],
-        'info': COLORS['info'],
-        'accent': COLORS['accent']
-    }
+    # Frame centrado con ancho máximo
+    center_frame = create_styled_frame(main_frame, bg=bg_color)
+    center_frame.place(relx=0.5, rely=0.5, anchor='center')
+    center_frame.configure(width=max_width)
     
-    card_color = card_colors.get(card_type, COLORS['primary'])
-    
-    # Tarjeta principal con sombra sutil
-    card = tk.Frame(
-        card_container,
-        bg=COLORS['white'],
-        relief='solid',
-        bd=1,
-        highlightbackground=COLORS['border'],
-        highlightthickness=1
-    )
-    card.pack(fill='both', expand=True, padx=2, pady=2)
-    
-    # Área de imagen/placeholder (parte superior)
-    if image_placeholder:
-        image_area = tk.Frame(
-            card,
-            bg=COLORS['bg_secondary'],
-            height=120
-        )
-        image_area.pack(fill='x')
-        image_area.pack_propagate(False)
-        
-        # Placeholder de imagen
-        image_label = create_styled_label(
-            image_area,
-            text=image_placeholder,
-            font=FONTS['heading'],
-            bg=COLORS['bg_secondary'],
-            fg=COLORS['text_muted']
-        )
-        image_label.place(relx=0.5, rely=0.5, anchor='center')
-    
-    # Área de contenido blanco
-    content_area = tk.Frame(
-        card,
-        bg=COLORS['white']
-    )
-    content_area.pack(fill='both', expand=True, padx=20, pady=15)
-    
-    # Título de la tarjeta
-    if title:
-        title_label = create_styled_label(
-            content_area,
-            text=title,
-            font=FONTS['subtitle'],
-            fg=COLORS['text_primary'],
-            bg=COLORS['white']
-        )
-        title_label.pack(anchor='w', pady=(0, 10))
-    
-    # Descripción/contenido
-    description = create_styled_label(
-        content_area,
-        text="Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis maximus quod deserunt eligendi dolor.",
-        font=FONTS['small'],
-        fg=COLORS['text_secondary'],
-        bg=COLORS['white'],
-        wraplength=200,
-        justify='left'
-    )
-    description.pack(anchor='w', pady=(0, 15))
-    
-    # Área de estadísticas con color de fondo
-    stats_area = tk.Frame(
-        card,
-        bg=card_color,
-        height=60
-    )
-    stats_area.pack(fill='x')
-    stats_area.pack_propagate(False)
-    
-    # Contenedor de estadísticas
-    stats_container = tk.Frame(stats_area, bg=card_color)
-    stats_container.pack(expand=True, fill='both')
-    
-    # Crear estadísticas en fila
-    if stats_data and len(stats_data) >= 3:
-        # Dividir en 3 columnas
-        for i, (label, value) in enumerate(stats_data[:3]):
-            stat_frame = tk.Frame(stats_container, bg=card_color)
-            stat_frame.pack(side='left', expand=True, fill='both')
-            
-            # Valor grande
-            value_label = create_styled_label(
-                stat_frame,
-                text=str(value),
-                font=('Segoe UI', 16, 'bold'),
-                fg=COLORS['text_light'],
-                bg=card_color
-            )
-            value_label.pack(expand=True)
-            
-            # Etiqueta pequeña
-            label_label = create_styled_label(
-                stat_frame,
-                text=label.upper(),
-                font=('Segoe UI', 8),
-                fg=COLORS['text_light'],
-                bg=card_color
-            )
-            label_label.pack()
-    
-    return card_container
+    return main_frame, center_frame

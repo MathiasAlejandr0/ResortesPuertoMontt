@@ -1,175 +1,180 @@
-# Sistema de Gestión para Taller Mecánico
+# 🔧 Sistema de Gestión - Resortes Puerto Montt
 
-## Descripción
+Sistema integral de gestión empresarial para taller mecánico desarrollado en Python con interfaz gráfica moderna.
 
-Sistema completo de gestión empresarial desarrollado en Python para talleres mecánicos. Incluye gestión de inventario, clientes, trabajos, proveedores y reportes con interfaz gráfica de escritorio.
+## 📋 Descripción
 
-## Características Principales
+Sistema completo de gestión empresarial diseñado específicamente para talleres mecánicos, que incluye módulos para:
 
-### 🔧 Módulo de Inventario
-- **Gestión de Productos**: Registro completo con código, lote, proveedor, stock y precios
-- **Control de Stock**: Alertas automáticas de stock bajo y configuración de mínimos/máximos
-- **Ventas**: Sistema de ventas con control de sobrantes y actualización automática de inventario
-- **Productos Estrella**: Análisis de productos más vendidos para recomendaciones de compra
+- 👥 **Gestión de Clientes**
+- 📦 **Control de Inventario**
+- 📋 **Cotizaciones y Ventas**
+- 🔧 **Gestión de Taller**
+- 👷 **Recursos Humanos**
+- 📊 **Reportes y Analytics**
 
-### 👥 Módulo de Clientes y Ventas
-- **Gestión de Clientes**: Datos completos (nombre, teléfono, correo, RUT, patente)
-- **Historial de Ventas**: Seguimiento completo de transacciones con filtros por fecha y cliente
-- **Cotizaciones**: Sistema de cotizaciones (en desarrollo)
-- **Boletas**: Generación de boletas internas
+## ✨ Características
 
-### 🚗 Módulo de Taller
-- **Órdenes de Trabajo**: Creación y seguimiento de trabajos con asignación de trabajadores
-- **Gestión de Máquinas**: Registro de vehículos/máquinas por cliente
-- **Trabajadores**: Asignación de personal a trabajos con control de horas
-- **Costos**: Cálculo automático de costos (mano de obra + repuestos)
-- **Precio Final**: Campo manual para que el dueño establezca el precio al cliente
+### 🎨 Interfaz Moderna
+- **Sidebar lateral** para navegación intuitiva
+- **Dashboard** con métricas en tiempo real
+- **Diseño responsivo** y centrado
+- **Colores corporativos** (Rojo Bermellón #A51611)
 
-### 🏢 Módulo de Proveedores
-- **Gestión de Proveedores**: Datos completos de proveedores
-- **Órdenes de Compra**: Sistema de compras (en desarrollo)
-- **Control de Pagos**: Seguimiento de deudas y pagos a proveedores
+### 🚀 Funcionalidades Principales
+- **Autenticación segura** con roles de usuario
+- **Base de datos SQLite** integrada
+- **Formularios dinámicos** con validación
+- **Búsqueda avanzada** en todos los módulos
+- **Sistema de respaldos** automático
+- **Logs detallados** del sistema
 
-### 📊 Módulo de Reportes
-- **Stock Bajo**: Alertas y reportes de productos con stock insuficiente
-- **Trabajos Pendientes**: Seguimiento de trabajos en curso
-- **Ventas Mensuales**: Análisis de ventas por período
-- **Utilidad por Trabajo**: Cálculo de rentabilidad por trabajo
-- **Exportación**: Funcionalidad para exportar a Excel (en desarrollo)
+### 📦 Módulos Incluidos
+- **Clientes**: Gestión completa de información de clientes
+- **Inventario**: Control de stock y productos
+- **Cotizaciones**: Creación y seguimiento de cotizaciones
+- **Taller**: Gestión de servicios y reparaciones
+- **Proveedores**: Administración de proveedores
+- **Trabajadores**: Recursos humanos
+- **Reportes**: Análisis y reportes del negocio
 
-### 🔐 Sistema de Seguridad
-- **Control de Usuarios**: Roles diferenciados (administrador, taller, bodega, ventas)
-- **Autenticación**: Sistema de login seguro
-- **Permisos**: Acceso diferenciado según rol del usuario
+## 🛠️ Tecnologías Utilizadas
 
-## Instalación y Uso
+- **Python 3.12+**
+- **Tkinter** - Interfaz gráfica
+- **SQLite3** - Base de datos
+- **Pandas** - Análisis de datos
+- **Matplotlib** - Gráficos y reportes
 
-### Requisitos del Sistema
-- Windows 10/11
-- Python 3.8 o superior
-- 4GB RAM mínimo
-- 500MB espacio en disco
+## 📦 Instalación
 
-### Instalación
+### Requisitos Previos
+- Python 3.12 o superior
+- pip (gestor de paquetes de Python)
 
-#### Opción 1: Ejecutable (.exe) - RECOMENDADO
-1. Descargar el archivo `TallerMecanico.exe`
-2. Ejecutar directamente (no requiere instalación)
-3. La base de datos se crea automáticamente en la primera ejecución
+### Pasos de Instalación
 
-#### Opción 2: Código Fuente
-1. Clonar o descargar el repositorio
-2. Instalar dependencias:
+1. **Clonar el repositorio**
+   ```bash
+   git clone https://github.com/MathiasAlejandr0/ResortesPuertoMontt.git
+   cd ResortesPuertoMontt
+   ```
+
+2. **Instalar dependencias**
    ```bash
    pip install -r requirements.txt
    ```
-3. Ejecutar la aplicación:
+
+3. **Ejecutar el sistema**
    ```bash
    python main.py
    ```
+   
+   O usar el script de Windows:
+   ```bash
+   run_app.bat
+   ```
 
-### Usuarios por Defecto
-- **Administrador**: `admin` / `admin123`
-- **Taller**: `taller` / `taller123`
-- **Bodega**: `bodega` / `bodega123`
-- **Ventas**: `ventas` / `ventas123`
+## 🔐 Acceso al Sistema
 
-## Estructura del Proyecto
+### Credenciales por Defecto
+- **Usuario**: `admin`
+- **Contraseña**: `admin123`
+
+> ⚠️ **Importante**: Cambiar las credenciales por defecto en el primer uso.
+
+## 📁 Estructura del Proyecto
 
 ```
-Proyecto ResortesPuertoMontt/
-├── main.py                 # Archivo principal de la aplicación
-├── requirements.txt        # Dependencias del proyecto
-├── modules/               # Módulos del sistema
-│   ├── __init__.py
-│   ├── database.py        # Base de datos SQLite
-│   ├── inventory.py       # Gestión de inventario
-│   ├── clients.py         # Clientes y ventas
-│   ├── workshop.py        # Taller mecánico
-│   ├── suppliers.py       # Proveedores y compras
-│   ├── reports.py         # Reportes y análisis
-│   └── auth.py           # Autenticación y usuarios
-├── README.md              # Esta documentación
-└── build_exe.py          # Script para crear ejecutable
+ResortesPuertoMontt/
+├── main.py                    # Archivo principal
+├── modules/                   # Módulos del sistema
+│   ├── auth.py               # Autenticación
+│   ├── clients.py            # Gestión de clientes
+│   ├── inventory.py          # Control de inventario
+│   ├── quotes.py             # Cotizaciones
+│   ├── styles.py             # Estilos y colores
+│   └── ...                   # Otros módulos
+├── assets/                   # Recursos del sistema
+├── backups/                  # Respaldos automáticos
+├── logs/                     # Logs del sistema
+├── requirements.txt          # Dependencias
+└── README.md                # Este archivo
 ```
 
-## Funcionalidades por Rol
+## 🚀 Uso del Sistema
 
-### 👑 Administrador
-- Acceso completo a todos los módulos
-- Gestión de usuarios y contraseñas
-- Configuración del sistema
-- Reportes completos
+### 1. Inicio de Sesión
+- Ejecutar `python main.py`
+- Ingresar credenciales de usuario
+- El sistema mostrará el dashboard principal
 
-### 🔧 Taller
-- Gestión de órdenes de trabajo
-- Asignación de trabajadores
-- Control de máquinas y vehículos
-- Establecimiento de precios finales
+### 2. Navegación
+- Usar el **sidebar lateral** para cambiar entre módulos
+- El **dashboard** muestra métricas en tiempo real
+- Cada módulo tiene su propia interfaz especializada
 
-### 📦 Bodega
-- Gestión de inventario
-- Control de stock
-- Registro de ventas
-- Alertas de stock bajo
+### 3. Gestión de Datos
+- **Agregar**: Usar botones "Nuevo" en cada módulo
+- **Editar**: Seleccionar elemento y usar botón "Editar"
+- **Eliminar**: Seleccionar elemento y usar botón "Eliminar"
+- **Buscar**: Usar campos de búsqueda en cada módulo
 
-### 💰 Ventas
-- Gestión de clientes
-- Historial de ventas
-- Generación de boletas
-- Cotizaciones
+## 🔧 Configuración
 
-## Base de Datos
+### Personalización de Colores
+Los colores del sistema se pueden modificar en `modules/styles.py`:
 
-El sistema utiliza SQLite como base de datos local, que se crea automáticamente en la primera ejecución. Las tablas principales incluyen:
+```python
+COLORS = {
+    'primary': '#A51611',       # Rojo bermellón principal
+    'primary_light': '#C41E3A', # Rojo bermellón claro
+    'primary_dark': '#8B0000',  # Rojo bermellón oscuro
+    # ... otros colores
+}
+```
 
-- **users**: Usuarios del sistema
-- **products**: Productos del inventario
-- **clients**: Clientes del taller
-- **suppliers**: Proveedores
-- **work_orders**: Órdenes de trabajo
-- **workers**: Trabajadores
-- **machines**: Máquinas/vehículos
-- **sales**: Ventas realizadas
-- **purchase_orders**: Órdenes de compra
+### Base de Datos
+- La base de datos SQLite se crea automáticamente
+- Ubicación: `taller_mecanico.db`
+- Se incluyen respaldos automáticos en `backups/`
 
-## Características Técnicas
+## 📊 Características Técnicas
 
-- **Interfaz**: Tkinter con diseño moderno y responsive
-- **Colores**: Esquema institucional con rojo bermellón (#a51611)
-- **Base de Datos**: SQLite con transacciones ACID
 - **Arquitectura**: Modular y escalable
-- **Multiplataforma**: Desarrollado para Windows, portable a otros sistemas
-- **Rendimiento**: Optimizado para uso empresarial
+- **Base de Datos**: SQLite3 con esquema optimizado
+- **Interfaz**: Tkinter con diseño moderno
+- **Seguridad**: Autenticación con hash SHA-256
+- **Logs**: Sistema de logging completo
+- **Respaldos**: Automáticos y manuales
 
-## Roadmap de Desarrollo
+## 🤝 Contribuciones
 
-### Versión Actual (1.0)
-- ✅ Sistema base completo
-- ✅ Gestión de inventario
-- ✅ Gestión de clientes y ventas
-- ✅ Sistema de taller
-- ✅ Gestión de proveedores
-- ✅ Reportes básicos
-- ✅ Sistema de usuarios y roles
+Las contribuciones son bienvenidas. Para contribuir:
 
-### Próximas Versiones
-- **1.1**: Sistema de cotizaciones completo
-- **1.2**: Exportación a Excel y PDF
-- **1.3**: Análisis avanzado de productos estrella
-- **2.0**: Versión web
-- **3.0**: Aplicación móvil
+1. Fork el proyecto
+2. Crear una rama para tu feature (`git checkout -b feature/AmazingFeature`)
+3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
+4. Push a la rama (`git push origin feature/AmazingFeature`)
+5. Abrir un Pull Request
 
-## Soporte y Contacto
+## 📝 Licencia
 
-Para soporte técnico o consultas sobre el sistema:
-- Crear un issue en el repositorio
-- Contactar al equipo de desarrollo
+Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
 
-## Licencia
+## 👨‍💻 Desarrollador
 
-Este software es propiedad de la empresa y está destinado para uso interno.
+**Mathias Alejandro**
+- GitHub: [@MathiasAlejandr0](https://github.com/MathiasAlejandr0)
+- Proyecto: [ResortesPuertoMontt](https://github.com/MathiasAlejandr0/ResortesPuertoMontt)
+
+## 📞 Soporte
+
+Para soporte técnico o consultas:
+- Crear un issue en GitHub
+- Contactar al desarrollador
 
 ---
 
-**Desarrollado con ❤️ para optimizar la gestión de talleres mecánicos**
+**Sistema de Gestión - Resortes Puerto Montt**  
+*Desarrollado con ❤️ en Python*

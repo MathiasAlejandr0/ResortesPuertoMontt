@@ -15,9 +15,9 @@ class WorkersModule:
     
     def create_widgets(self):
         """Crear todos los widgets del módulo"""
-        # Frame principal
-        main_frame = create_styled_frame(self.frame, bg=COLORS['white'])
-        main_frame.pack(fill='both', expand=True, padx=15, pady=15)
+        # Frame principal centrado
+        main_frame = create_styled_frame(self.frame, bg=COLORS['bg_primary'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
         
         # Título
         title_label = create_styled_label(

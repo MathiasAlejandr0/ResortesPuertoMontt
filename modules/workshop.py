@@ -15,9 +15,9 @@ class WorkshopModule:
     
     def create_widgets(self):
         """Crear todos los widgets del módulo"""
-        # Frame principal
-        main_frame = create_styled_frame(self.frame, bg=COLORS['white'])
-        main_frame.pack(fill='both', expand=True, padx=15, pady=15)
+        # Frame principal centrado
+        main_frame = create_styled_frame(self.frame, bg=COLORS['bg_primary'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
         
         # Título
         title_label = create_styled_label(
@@ -415,12 +415,12 @@ class WorkshopModule:
                 worker_id = int(worker_text.split(' - ')[0])
             
             # Insertar orden de trabajo en la base de datos
-            self.db.execute("""
+                self.db.execute("""
                 INSERT INTO work_orders (client_id, vehicle_info, description, status, worker_id, start_date)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (client_id, vehicle_info, description, status, worker_id, datetime.now().isoformat()))
             
-            messagebox.showinfo("Éxito", "Orden de trabajo creada correctamente")
+                messagebox.showinfo("Éxito", "Orden de trabajo creada correctamente")
             self.order_form_window.destroy()
             self.load_work_orders()
             
@@ -433,7 +433,7 @@ class WorkshopModule:
         if not selection:
             messagebox.showwarning("Advertencia", "Por favor seleccione una orden")
             return
-            
+        
         order_id = self.orders_tree.item(selection[0])['values'][0]
         messagebox.showinfo("Información", f"Editando orden #{order_id} - Funcionalidad en desarrollo")
     
@@ -443,7 +443,7 @@ class WorkshopModule:
         if not selection:
             messagebox.showwarning("Advertencia", "Por favor seleccione una orden")
             return
-            
+        
         order_id = self.orders_tree.item(selection[0])['values'][0]
         client_name = self.orders_tree.item(selection[0])['values'][1]
         

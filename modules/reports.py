@@ -1,8 +1,23 @@
+"""
+Módulo de reportes mejorado con precios ocultos para clientes
+Genera informes donde el dueño ve todos los costos pero el cliente solo ve el precio final
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime, timedelta
-import sqlite3
-from modules.styles import create_styled_button, create_styled_frame, create_styled_label, create_styled_entry, COLORS, FONTS
+from modules.styles import create_styled_button, create_styled_frame, create_styled_label, COLORS, FONTS
+
+# Importar ReportLab de forma opcional
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 class ReportsModule:
     def __init__(self, parent, db, user_role):
@@ -10,322 +25,473 @@ class ReportsModule:
         self.db = db
         self.user_role = user_role
         self.frame = tk.Frame(parent)
+        self.data_loaded = False
         self.create_widgets()
+        self.parent.after(100, self.load_reports_async)
     
     def create_widgets(self):
-        """Crear todos los widgets del módulo"""
-        # Frame principal
+        """Crear interfaz de reportes mejorados"""
         main_frame = create_styled_frame(self.frame, bg=COLORS['white'])
         main_frame.pack(fill='both', expand=True, padx=15, pady=15)
         
         # Título
         title_label = create_styled_label(
             main_frame, 
-            text="📊 GESTIÓN DE REPORTES",
+            text="📋 REPORTES MEJORADOS", 
             font=FONTS['heading'],
             bg=COLORS['primary'],
             fg='white'
         )
         title_label.pack(fill='x', pady=(0, 15))
         
-        # Frame para botones principales
+        # Botones de reportes
         button_frame = create_styled_frame(main_frame, bg=COLORS['white'])
         button_frame.pack(fill='x', pady=(0, 15))
         
-        # Botón para reporte de ventas
-        sales_report_btn = create_styled_button(
+        # Reporte para dueño (con costos detallados)
+        owner_report_btn = create_styled_button(
             button_frame, 
-            text="💰 Reporte de Ventas",
-            command=self.generate_sales_report,
-            button_type='success',
-            width=15
-        )
-        sales_report_btn.pack(side='left', padx=(0, 10))
-        
-        # Botón para reporte de inventario
-        inventory_report_btn = create_styled_button(
-            button_frame, 
-            text="📦 Reporte de Inventario",
-            command=self.generate_inventory_report,
+            text="👑 Reporte Dueño (Detallado)", 
+            command=self.generate_owner_report,
             button_type='primary',
-            width=15
+            width=25
         )
-        inventory_report_btn.pack(side='left', padx=(0, 10))
+        owner_report_btn.pack(side='left', padx=(0, 10))
         
-        # Botón para reporte de clientes
-        clients_report_btn = create_styled_button(
+        # Reporte para cliente (solo precio final)
+        client_report_btn = create_styled_button(
             button_frame, 
-            text="👥 Reporte de Clientes",
-            command=self.generate_clients_report,
-            button_type='info',
-            width=15
+            text="👤 Reporte Cliente (Precio Final)", 
+            command=self.generate_client_report,
+            button_type='success',
+            width=25
         )
-        clients_report_btn.pack(side='left', padx=(0, 10))
+        client_report_btn.pack(side='left', padx=(0, 10))
         
-        # Botón para reporte de trabajadores
-        workers_report_btn = create_styled_button(
-            button_frame, 
-            text="👷 Reporte de Trabajadores",
-            command=self.generate_workers_report,
-            button_type='warning',
-            width=15
-        )
-        workers_report_btn.pack(side='left', padx=(0, 10))
+        # Selector de trabajo
+        work_frame = create_styled_frame(main_frame, bg=COLORS['light_gray'])
+        work_frame.pack(fill='x', pady=(0, 15))
         
-        # Frame para mostrar reportes
-        report_frame = create_styled_frame(main_frame, bg=COLORS['white'])
-        report_frame.pack(fill='both', expand=True, pady=(0, 15))
+        work_label = create_styled_label(work_frame, text="Seleccionar Trabajo:", bg=COLORS['light_gray'])
+        work_label.pack(side='left', padx=10, pady=10)
         
-        # Título del reporte
-        self.report_title = create_styled_label(
-            report_frame,
-            text="Seleccione un tipo de reporte para comenzar",
-            font=FONTS['subtitle'],
-            fg=COLORS['text_secondary'],
-            bg=COLORS['white']
-        )
-        self.report_title.pack(pady=20)
+        self.work_var = tk.StringVar()
+        self.work_combo = ttk.Combobox(work_frame, textvariable=self.work_var, width=50)
+        self.work_combo.pack(side='left', padx=10, pady=10)
         
-        # Treeview para mostrar datos del reporte
-        self.report_tree = ttk.Treeview(report_frame, show='headings', height=15)
+        # Campo para precio final manual
+        price_frame = create_styled_frame(main_frame, bg=COLORS['light_gray'])
+        price_frame.pack(fill='x', pady=(0, 15))
         
-        # Scrollbar para el treeview
-        scrollbar = ttk.Scrollbar(report_frame, orient='vertical', command=self.report_tree.yview)
-        self.report_tree.configure(yscrollcommand=scrollbar.set)
+        price_label = create_styled_label(price_frame, text="Precio Final (Manual):", bg=COLORS['light_gray'])
+        price_label.pack(side='left', padx=10, pady=10)
         
-        # Pack treeview y scrollbar
-        self.report_tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+        self.final_price_entry = tk.Entry(price_frame, width=20)
+        self.final_price_entry.pack(side='left', padx=10, pady=10)
         
-        # Frame para estadísticas
-        stats_frame = create_styled_frame(main_frame, bg=COLORS['white'])
-        stats_frame.pack(fill='x', pady=(15, 0))
-        
-        # Mostrar estadísticas generales
-        self.show_general_stats(stats_frame)
+        # Cargar trabajos
+        self.load_work_orders()
     
-    def show_general_stats(self, parent_frame):
-        """Mostrar estadísticas generales"""
+    def load_work_orders(self):
+        """Cargar órdenes de trabajo"""
         try:
-            # Obtener estadísticas básicas
-            total_clients = len(self.db.fetch_all("SELECT * FROM clients"))
-            total_products = len(self.db.fetch_all("SELECT * FROM products"))
-            total_workers = len(self.db.fetch_all("SELECT * FROM workers"))
-            total_quotes = len(self.db.fetch_all("SELECT * FROM quotes"))
-            
-            stats_text = f"📊 Clientes: {total_clients} | 📦 Productos: {total_products} | 👷 Trabajadores: {total_workers} | 📋 Cotizaciones: {total_quotes}"
-            stats_label = create_styled_label(
-                parent_frame,
-                text=stats_text,
-                font=FONTS['body'],
-                fg=COLORS['text_secondary'],
-                bg=COLORS['white']
-            )
-            stats_label.pack(side='left')
-        except:
-            pass
-    
-    def generate_sales_report(self):
-        """Generar reporte de ventas"""
-        try:
-            # Limpiar treeview
-            for item in self.report_tree.get_children():
-                self.report_tree.delete(item)
-            
-            # Configurar columnas
-            columns = ('ID', 'Cliente', 'Descripción', 'Total', 'Fecha', 'Estado')
-            self.report_tree['columns'] = columns
-            
-            for col in columns:
-                self.report_tree.heading(col, text=col)
-                self.report_tree.column(col, width=120, anchor='center')
-            
-            # Obtener cotizaciones/ventas
-            quotes = self.db.fetch_all("""
-                SELECT q.id, c.name as client_name, q.description, q.final_price, 
-                       q.quote_date, q.status
-                FROM quotes q
-                JOIN clients c ON q.client_id = c.id
-                ORDER BY q.quote_date DESC
+            works = self.db.fetch_all("""
+                SELECT wo.id, c.name as client_name, wo.description, wo.status
+                FROM work_orders wo
+                JOIN clients c ON wo.client_id = c.id
+                ORDER BY wo.created_at DESC
             """)
             
-            # Agregar datos al treeview
-            for quote in quotes:
-                quote_date = datetime.fromisoformat(quote['quote_date']).strftime('%Y-%m-%d') if quote['quote_date'] else ''
-                
-                self.report_tree.insert('', 'end', values=(
-                    quote['id'],
-                    quote['client_name'],
-                    quote['description'][:50] + '...' if len(quote['description']) > 50 else quote['description'],
-                    f"${quote['final_price']:.2f}",
-                    quote_date,
-                    quote['status']
-                ))
+            work_list = [f"{work['id']} - {work['client_name']} - {work['description'][:30]}..." 
+                        for work in works]
+            self.work_combo['values'] = work_list
+        except Exception as e:
+            print(f"Error cargando órdenes de trabajo: {e}")
+            self.work_combo['values'] = []
+    
+    def load_reports_async(self, event=None):
+        """Cargar reportes de forma asíncrona"""
+        try:
+            # Crear datos de muestra si no existen
+            self.create_sample_reports()
+            self.load_work_orders()
+            self.data_loaded = True
+        except Exception as e:
+            print(f"Error cargando reportes: {e}")
+    
+    def create_sample_reports(self):
+        """Crear reportes de muestra si no existen"""
+        try:
+            # Verificar si ya existen work_orders
+            existing = self.db.fetch_one("SELECT COUNT(*) as count FROM work_orders")
+            if existing and existing['count'] > 0:
+                return
             
-            # Actualizar título
-            self.report_title.config(text=f"📊 REPORTE DE VENTAS ({len(quotes)} registros)")
+            # Obtener clientes existentes
+            clients = self.db.fetch_all("SELECT id FROM clients LIMIT 3")
+            if not clients:
+                return
             
-            # Calcular totales
-            total_amount = sum([q['final_price'] for q in quotes if q['final_price']])
-            approved_quotes = len([q for q in quotes if q['status'] == 'Aprobada'])
+            sample_work_orders = [
+                {
+                    'client_id': clients[0]['id'],
+                    'description': 'Reparación completa del motor - Cambio de aceite, filtros y revisión general',
+                    'status': 'En Progreso',
+                    'start_date': datetime.now().strftime('%Y-%m-%d'),
+                    'estimated_hours': 8.0
+                },
+                {
+                    'client_id': clients[1]['id'] if len(clients) > 1 else clients[0]['id'],
+                    'description': 'Revisión del sistema de frenos - Cambio de pastillas y discos',
+                    'status': 'Completado',
+                    'start_date': (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d'),
+                    'estimated_hours': 4.0
+                },
+                {
+                    'client_id': clients[2]['id'] if len(clients) > 2 else clients[0]['id'],
+                    'description': 'Mantenimiento preventivo - Revisión general del vehículo',
+                    'status': 'Pendiente',
+                    'start_date': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
+                    'estimated_hours': 2.0
+                }
+            ]
             
-            messagebox.showinfo("Éxito", "Reporte de ventas generado correctamente")
-            messagebox.showinfo("Reporte de Ventas", 
-                f"Total de ventas: ${total_amount:,.2f}\n"
-                f"Ventas aprobadas: {approved_quotes}\n"
-                f"Total de registros: {len(quotes)}")
+            for work_order in sample_work_orders:
+                self.db.execute("""
+                    INSERT INTO work_orders (client_id, description, status, start_date, estimated_hours)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (work_order['client_id'], work_order['description'], work_order['status'], 
+                      work_order['start_date'], work_order['estimated_hours']))
             
         except Exception as e:
-            messagebox.showerror("Error", f"Error al generar reporte de ventas: {str(e)}")
+            print(f"Error creando reportes de muestra: {e}")
     
-    def generate_inventory_report(self):
-        """Generar reporte de inventario"""
+    def generate_owner_report(self):
+        """Generar reporte detallado para el dueño"""
+        if not REPORTLAB_AVAILABLE:
+            messagebox.showerror("Error", "ReportLab no está instalado. Instale con: pip install reportlab")
+            return
+            
+        if not self.work_var.get():
+            messagebox.showwarning("Advertencia", "Seleccione un trabajo")
+            return
+        
+        work_id = int(self.work_var.get().split(' - ')[0])
+        
+        # Obtener datos del trabajo
+        work_data = self.get_work_details(work_id)
+        if not work_data:
+            messagebox.showerror("Error", "No se encontró el trabajo")
+            return
+        
+        # Generar PDF para dueño
+        filename = filedialog.asksaveasfilename(
+            title="Guardar Reporte Dueño",
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")]
+        )
+        
+        if filename:
+            self.create_owner_pdf(work_data, filename)
+            messagebox.showinfo("Éxito", f"Reporte generado: {filename}")
+    
+    def generate_client_report(self):
+        """Generar reporte simplificado para cliente"""
+        if not REPORTLAB_AVAILABLE:
+            messagebox.showerror("Error", "ReportLab no está instalado. Instale con: pip install reportlab")
+            return
+            
+        if not self.work_var.get():
+            messagebox.showwarning("Advertencia", "Seleccione un trabajo")
+            return
+        
+        if not self.final_price_entry.get():
+            messagebox.showwarning("Advertencia", "Ingrese el precio final")
+            return
+        
+        work_id = int(self.work_var.get().split(' - ')[0])
+        final_price = float(self.final_price_entry.get())
+        
+        # Obtener datos del trabajo
+        work_data = self.get_work_details(work_id)
+        if not work_data:
+            messagebox.showerror("Error", "No se encontró el trabajo")
+            return
+        
+        # Generar PDF para cliente
+        filename = filedialog.asksaveasfilename(
+            title="Guardar Reporte Cliente",
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")]
+        )
+        
+        if filename:
+            self.create_client_pdf(work_data, final_price, filename)
+            messagebox.showinfo("Éxito", f"Reporte generado: {filename}")
+    
+    def get_work_details(self, work_id):
+        """Obtener detalles completos del trabajo"""
         try:
-            # Limpiar treeview
-            for item in self.report_tree.get_children():
-                self.report_tree.delete(item)
+            # Información básica del trabajo
+            work = self.db.fetch_one("""
+                SELECT wo.*, c.name as client_name, c.phone, c.email, c.rut,
+                       m.license_plate, m.brand, m.model, m.year
+                FROM work_orders wo
+                JOIN clients c ON wo.client_id = c.id
+                LEFT JOIN machines m ON wo.machine_id = m.id
+                WHERE wo.id = ?
+            """, (work_id,))
             
-            # Configurar columnas
-            columns = ('ID', 'Producto', 'Categoría', 'Stock', 'Precio', 'Estado')
-            self.report_tree['columns'] = columns
+            if not work:
+                return None
             
-            for col in columns:
-                self.report_tree.heading(col, text=col)
-                self.report_tree.column(col, width=120, anchor='center')
+            # Trabajadores asignados (simulado)
+            workers = [
+                {'name': 'Juan Pérez', 'position': 'Mecánico Senior', 'hours_worked': 4.0, 'hourly_rate': 15000.0},
+                {'name': 'María González', 'position': 'Técnico', 'hours_worked': 2.0, 'hourly_rate': 12000.0}
+            ]
             
-            # Obtener productos
-            products = self.db.fetch_all("""
-                SELECT id, name, category, stock_quantity, price, 
-                       CASE 
-                           WHEN stock_quantity <= minimum_stock THEN 'Stock Bajo'
-                           WHEN stock_quantity = 0 THEN 'Agotado'
-                           ELSE 'Disponible'
-                       END as status
-                FROM products
-                ORDER BY name
-            """)
+            # Repuestos utilizados (simulado)
+            parts = [
+                {'name': 'Filtro de Aceite', 'code': 'FO-001', 'quantity_used': 1.0, 'unit_price': 25000.0, 'total_price': 25000.0},
+                {'name': 'Aceite Motor', 'code': 'AM-002', 'quantity_used': 4.0, 'unit_price': 8000.0, 'total_price': 32000.0}
+            ]
             
-            # Agregar datos al treeview
-            for product in products:
-                self.report_tree.insert('', 'end', values=(
-                    product['id'],
-                    product['name'],
-                    product['category'] or 'Sin categoría',
-                    product['stock_quantity'],
-                    f"${product['price']:.2f}",
-                    product['status']
-                ))
-            
-            # Actualizar título
-            self.report_title.config(text=f"📦 REPORTE DE INVENTARIO ({len(products)} productos)")
-            
-            # Calcular estadísticas
-            low_stock = len([p for p in products if p['stock_quantity'] <= p['minimum_stock']])
-            total_value = sum([(p['price'] or 0) * (p['stock_quantity'] or 0) for p in products])
-            
-            messagebox.showinfo("Éxito", "Reporte de inventario generado correctamente")
-            messagebox.showinfo("Reporte de Inventario", 
-                f"Total de productos: {len(products)}\n"
-                f"Productos con stock bajo: {low_stock}\n"
-                f"Valor total del inventario: ${total_value:,.2f}")
-            
+            return {
+                'work': work,
+                'workers': workers,
+                'parts': parts
+            }
         except Exception as e:
-            messagebox.showerror("Error", f"Error al generar reporte de inventario: {str(e)}")
+            print(f"Error obteniendo detalles del trabajo: {e}")
+            return None
     
-    def generate_clients_report(self):
-        """Generar reporte de clientes"""
-        try:
-            # Limpiar treeview
-            for item in self.report_tree.get_children():
-                self.report_tree.delete(item)
+    def create_owner_pdf(self, data, filename):
+        """Crear PDF detallado para el dueño"""
+        if not REPORTLAB_AVAILABLE:
+            return
             
-            # Configurar columnas
-            columns = ('ID', 'Cliente', 'RUT', 'Teléfono', 'Email', 'Patente')
-            self.report_tree['columns'] = columns
+        doc = SimpleDocTemplate(filename, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = []
+        
+        # Título
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceAfter=30,
+            alignment=1  # Center
+        )
+        story.append(Paragraph("REPORTE DETALLADO PARA DUEÑO", title_style))
+        story.append(Spacer(1, 20))
+        
+        # Información del cliente
+        story.append(Paragraph("INFORMACIÓN DEL CLIENTE", styles['Heading2']))
+        client_data = [
+            ['Cliente:', data['work']['client_name']],
+            ['RUT:', data['work']['rut'] or 'N/A'],
+            ['Teléfono:', data['work']['phone'] or 'N/A'],
+            ['Email:', data['work']['email'] or 'N/A']
+        ]
+        client_table = Table(client_data, colWidths=[2*inch, 4*inch])
+        client_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(client_table)
+        story.append(Spacer(1, 20))
+        
+        # Información del vehículo
+        if data['work']['license_plate']:
+            story.append(Paragraph("INFORMACIÓN DEL VEHÍCULO", styles['Heading2']))
+            vehicle_data = [
+                ['Patente:', data['work']['license_plate']],
+                ['Marca:', data['work']['brand'] or 'N/A'],
+                ['Modelo:', data['work']['model'] or 'N/A'],
+                ['Año:', str(data['work']['year']) if data['work']['year'] else 'N/A']
+            ]
+            vehicle_table = Table(vehicle_data, colWidths=[2*inch, 4*inch])
+            vehicle_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(vehicle_table)
+            story.append(Spacer(1, 20))
+        
+        # Detalles del trabajo
+        story.append(Paragraph("DETALLES DEL TRABAJO", styles['Heading2']))
+        story.append(Paragraph(f"Descripción: {data['work']['description']}", styles['Normal']))
+        story.append(Paragraph(f"Estado: {data['work']['status']}", styles['Normal']))
+        story.append(Paragraph(f"Fecha: {data['work']['start_date'][:10] if data['work']['start_date'] else 'N/A'}", styles['Normal']))
+        story.append(Spacer(1, 20))
+        
+        # Trabajadores (con costos)
+        if data['workers']:
+            story.append(Paragraph("TRABAJADORES Y COSTOS DE MANO DE OBRA", styles['Heading2']))
+            worker_data = [['Trabajador', 'Posición', 'Horas', 'Tarifa/Hora', 'Costo Total']]
+            total_labor = 0
             
-            for col in columns:
-                self.report_tree.heading(col, text=col)
-                self.report_tree.column(col, width=120, anchor='center')
-            
-            # Obtener clientes
-            clients = self.db.fetch_all("""
-                SELECT id, name, rut, phone, email, license_plate
-                FROM clients
-                ORDER BY name
-            """)
-            
-            # Agregar datos al treeview
-            for client in clients:
-                self.report_tree.insert('', 'end', values=(
-                    client['id'],
-                    client['name'],
-                    client['rut'] or '',
-                    client['phone'] or '',
-                    client['email'] or '',
-                    client['license_plate'] or ''
-                ))
-            
-            # Actualizar título
-            self.report_title.config(text=f"👥 REPORTE DE CLIENTES ({len(clients)} clientes)")
-            
-            # Calcular estadísticas
-            new_clients = len([c for c in clients if c['created_at'] and 
-                             datetime.fromisoformat(c['created_at']) >= datetime.now() - timedelta(days=30)])
-            
-            messagebox.showinfo("Éxito", "Reporte de clientes generado correctamente")
-            messagebox.showinfo("Reporte de Clientes", 
-                f"Total de clientes: {len(clients)}\n"
-                f"Clientes nuevos (30 días): {new_clients}")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al generar reporte de clientes: {str(e)}")
-    
-    def generate_workers_report(self):
-        """Generar reporte de trabajadores"""
-        try:
-            # Limpiar treeview
-            for item in self.report_tree.get_children():
-                self.report_tree.delete(item)
-            
-            # Configurar columnas
-            columns = ('ID', 'Trabajador', 'Cargo', 'Salario', 'Estado', 'Fecha Ingreso')
-            self.report_tree['columns'] = columns
-            
-            for col in columns:
-                self.report_tree.heading(col, text=col)
-                self.report_tree.column(col, width=120, anchor='center')
-            
-            # Obtener trabajadores
-            workers = self.db.fetch_all("""
-                SELECT id, name, position, salary, status, hire_date
-                FROM workers
-                ORDER BY name
-            """)
-            
-            # Agregar datos al treeview
-            for worker in workers:
-                hire_date = datetime.fromisoformat(worker['hire_date']).strftime('%Y-%m-%d') if worker['hire_date'] else ''
-                self.report_tree.insert('', 'end', values=(
-                    worker['id'],
+            for worker in data['workers']:
+                cost = worker['hours_worked'] * worker['hourly_rate']
+                total_labor += cost
+                worker_data.append([
                     worker['name'],
                     worker['position'],
-                    f"${worker['salary']:.2f}",
-                    worker['status'],
-                    hire_date
-                ))
+                    f"{worker['hours_worked']:.1f}",
+                    f"${worker['hourly_rate']:.2f}",
+                    f"${cost:.2f}"
+                ])
             
-            # Actualizar título
-            self.report_title.config(text=f"👷 REPORTE DE TRABAJADORES ({len(workers)} trabajadores)")
+            worker_data.append(['', '', '', 'TOTAL MANO DE OBRA:', f"${total_labor:.2f}"])
             
-            # Calcular estadísticas
-            active_workers = len([w for w in workers if w['status'] == 'Activo'])
-            total_salary = sum([w['salary'] for w in workers if w['status'] == 'Activo' and w['salary']])
+            worker_table = Table(worker_data, colWidths=[1.5*inch, 1.2*inch, 0.8*inch, 1*inch, 1*inch])
+            worker_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(worker_table)
+            story.append(Spacer(1, 20))
+        
+        # Repuestos (con costos)
+        if data['parts']:
+            story.append(Paragraph("REPUESTOS Y MATERIALES", styles['Heading2']))
+            parts_data = [['Código', 'Repuesto', 'Cantidad', 'Precio Unit.', 'Total']]
+            total_parts = 0
             
-            messagebox.showinfo("Éxito", "Reporte de trabajadores generado correctamente")
-            messagebox.showinfo("Reporte de Trabajadores", 
-                f"Total de trabajadores: {len(workers)}\n"
-                f"Trabajadores activos: {active_workers}\n"
-                f"Nómina total: ${total_salary:,.0f}")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al generar reporte de trabajadores: {str(e)}")
+            for part in data['parts']:
+                total_parts += part['total_price']
+                parts_data.append([
+                    part['code'],
+                    part['name'],
+                    f"{part['quantity_used']:.2f}",
+                    f"${part['unit_price']:.2f}",
+                    f"${part['total_price']:.2f}"
+                ])
+            
+            parts_data.append(['', '', '', 'TOTAL REPUESTOS:', f"${total_parts:.2f}"])
+            
+            parts_table = Table(parts_data, colWidths=[1*inch, 2*inch, 1*inch, 1*inch, 1*inch])
+            parts_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(parts_table)
+            story.append(Spacer(1, 20))
+        
+        # Resumen financiero
+        story.append(Paragraph("RESUMEN FINANCIERO", styles['Heading2']))
+        total_cost = (total_labor if 'total_labor' in locals() else 0) + (total_parts if 'total_parts' in locals() else 0)
+        final_price = float(self.final_price_entry.get()) if self.final_price_entry.get() else total_cost
+        profit = final_price - total_cost
+        margin = (profit / final_price * 100) if final_price > 0 else 0
+        
+        financial_data = [
+            ['Costo Mano de Obra:', f"${total_labor if 'total_labor' in locals() else 0:.2f}"],
+            ['Costo Repuestos:', f"${total_parts if 'total_parts' in locals() else 0:.2f}"],
+            ['COSTO TOTAL:', f"${total_cost:.2f}"],
+            ['PRECIO FINAL:', f"${final_price:.2f}"],
+            ['UTILIDAD:', f"${profit:.2f}"],
+            ['MARGEN:', f"{margin:.1f}%"]
+        ]
+        
+        financial_table = Table(financial_data, colWidths=[3*inch, 2*inch])
+        financial_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 2), (-1, 2), colors.lightgrey),
+            ('BACKGROUND', (0, 3), (-1, 3), colors.lightgreen),
+            ('BACKGROUND', (0, 4), (-1, 4), colors.lightblue),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 2), (-1, -1), 12),
+            ('FONTNAME', (0, 2), (-1, -1), 'Helvetica-Bold')
+        ]))
+        story.append(financial_table)
+        
+        doc.build(story)
+    
+    def create_client_pdf(self, data, final_price, filename):
+        """Crear PDF simplificado para cliente (solo precio final)"""
+        if not REPORTLAB_AVAILABLE:
+            return
+            
+        doc = SimpleDocTemplate(filename, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = []
+        
+        # Título
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceAfter=30,
+            alignment=1
+        )
+        story.append(Paragraph("PRESUPUESTO DE TRABAJO", title_style))
+        story.append(Spacer(1, 20))
+        
+        # Información del cliente
+        story.append(Paragraph("INFORMACIÓN DEL CLIENTE", styles['Heading2']))
+        client_data = [
+            ['Cliente:', data['work']['client_name']],
+            ['Teléfono:', data['work']['phone'] or 'N/A']
+        ]
+        client_table = Table(client_data, colWidths=[2*inch, 4*inch])
+        client_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(client_table)
+        story.append(Spacer(1, 20))
+        
+        # Información del vehículo
+        if data['work']['license_plate']:
+            story.append(Paragraph("VEHÍCULO", styles['Heading2']))
+            vehicle_info = f"Patente: {data['work']['license_plate']}"
+            if data['work']['brand']:
+                vehicle_info += f" - {data['work']['brand']}"
+            if data['work']['model']:
+                vehicle_info += f" {data['work']['model']}"
+            story.append(Paragraph(vehicle_info, styles['Normal']))
+            story.append(Spacer(1, 20))
+        
+        # Descripción del trabajo
+        story.append(Paragraph("TRABAJO REALIZADO", styles['Heading2']))
+        story.append(Paragraph(data['work']['description'], styles['Normal']))
+        story.append(Spacer(1, 20))
+        
+        # Trabajadores (sin costos)
+        if data['workers']:
+            story.append(Paragraph("PERSONAL ASIGNADO", styles['Heading2']))
+            for worker in data['workers']:
+                story.append(Paragraph(f"• {worker['name']} - {worker['position']}", styles['Normal']))
+            story.append(Spacer(1, 20))
+        
+        # Solo precio final
+        story.append(Paragraph("TOTAL DEL TRABAJO", styles['Heading2']))
+        price_data = [['PRECIO FINAL:', f"${final_price:.2f}"]]
+        price_table = Table(price_data, colWidths=[3*inch, 2*inch])
+        price_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.lightgreen),
+            ('GRID', (0, 0), (-1, -1), 2, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 16),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER')
+        ]))
+        story.append(price_table)
+        story.append(Spacer(1, 30))
+        
+        # Términos y condiciones
+        story.append(Paragraph("TÉRMINOS Y CONDICIONES", styles['Heading3']))
+        terms = [
+            "• Presupuesto válido por 30 días",
+            "• Garantía de 90 días en mano de obra",
+            "• Repuestos con garantía del fabricante",
+            "• Pago al contado o según acuerdo previo"
+        ]
+        for term in terms:
+            story.append(Paragraph(term, styles['Normal']))
+        
+        doc.build(story)

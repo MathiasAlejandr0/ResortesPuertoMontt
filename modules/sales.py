@@ -6,23 +6,20 @@ Permite vender materiales y gestionar automáticamente los sobrantes
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
-from .styles import (
+from modules.styles import (
     create_styled_button, create_styled_frame, create_styled_label, 
     create_styled_entry, COLORS, FONTS
 )
-from .remainders import RemaindersManager
-from .analytics import ProductAnalytics
 
-class EnhancedSalesModule:
+class SalesModule:
     def __init__(self, parent, db, user_role):
         self.parent = parent
         self.db = db
         self.user_role = user_role
-        self.remainders_manager = RemaindersManager(db)
-        self.analytics = ProductAnalytics(db)
         self.frame = tk.Frame(parent)
+        self.data_loaded = False
         self.create_widgets()
-        self.load_products()
+        self.parent.after(100, self.load_products_async)
     
     def create_widgets(self):
         """Crear interfaz de ventas mejorada"""
@@ -61,14 +58,14 @@ class EnhancedSalesModule:
         # Tabla de productos disponibles
         products_label = create_styled_label(
             products_frame, 
-            text="Productos Disponibles (incluye sobrantes):", 
+            text="Productos Disponibles:", 
             font=FONTS['body_bold'],
             bg=COLORS['white']
         )
         products_label.pack(pady=(0, 10))
         
         # Treeview para productos
-        columns = ('ID', 'Código', 'Nombre', 'Stock', 'Precio', 'Tipo', 'Origen')
+        columns = ('ID', 'Código', 'Nombre', 'Stock', 'Precio', 'Categoría')
         self.products_tree = ttk.Treeview(products_frame, columns=columns, show='headings', height=8)
         
         for col in columns:
@@ -127,48 +124,150 @@ class EnhancedSalesModule:
     
     def load_clients(self):
         """Cargar clientes en el combobox"""
-        clients = self.db.fetch_all("SELECT id, name FROM clients ORDER BY name")
-        client_list = [f"{client['id']} - {client['name']}" for client in clients]
-        self.client_combo['values'] = client_list
+        try:
+            clients = self.db.fetch_all("SELECT id, name FROM clients ORDER BY name")
+            client_list = [f"{client['id']} - {client['name']}" for client in clients]
+            self.client_combo['values'] = client_list
+        except Exception as e:
+            print(f"Error cargando clientes: {e}")
+            self.client_combo['values'] = []
     
-    def load_products(self):
-        """Cargar productos y sobrantes disponibles"""
-        # Limpiar tabla
-        for item in self.products_tree.get_children():
-            self.products_tree.delete(item)
-        
-        # Cargar productos regulares
-        products = self.db.fetch_all("""
-            SELECT id, code, name, stock, unit_price 
-            FROM products 
-            WHERE stock > 0 
-            ORDER BY name
-        """)
-        
-        for product in products:
-            self.products_tree.insert('', 'end', values=(
-                product['id'],
-                product['code'],
-                product['name'],
-                f"{product['stock']:.2f}",
-                f"${product['unit_price']:.2f}",
-                "Producto",
-                "Inventario"
-            ))
-        
-        # Cargar sobrantes disponibles
-        remainders = self.remainders_manager.get_available_remainders()
-        
-        for remainder in remainders:
-            self.products_tree.insert('', 'end', values=(
-                f"R{remainder['id']}",  # Prefijo R para sobrantes
-                remainder['product_code'],
-                f"{remainder['product_name']} (Sobrante)",
-                f"{remainder['quantity_available']:.2f}",
-                f"${remainder['unit_price']:.2f}",
-                "Sobrante",
-                f"Venta #{remainder['original_sale_id']}"
-            ))
+    def load_products_async(self, event=None):
+        """Cargar productos de forma asíncrona"""
+        try:
+            # Crear datos de muestra si no existen
+            self.create_sample_products()
+            
+            # Limpiar tabla
+            for item in self.products_tree.get_children():
+                self.products_tree.delete(item)
+            
+            # Cargar productos regulares
+            products = self.db.fetch_all("""
+                SELECT p.id, p.code, p.name, p.stock, p.unit_price, c.name as category_name
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE p.stock > 0 
+                ORDER BY p.name
+            """)
+            
+            batch_size = 50
+            for i in range(0, len(products), batch_size):
+                batch = products[i:i + batch_size]
+                for product in batch:
+                    self.products_tree.insert('', 'end', values=(
+                        product['id'],
+                        product['code'],
+                        product['name'],
+                        f"{product['stock']:.2f}",
+                        f"${product['unit_price']:.2f}",
+                        product['category_name'] or 'Sin categoría'
+                    ))
+                if i + batch_size < len(products):
+                    self.parent.update()
+            
+            self.data_loaded = True
+        except Exception as e:
+            print(f"Error cargando productos: {e}")
+    
+    def create_sample_products(self):
+        """Crear productos de muestra si no existen"""
+        try:
+            # Verificar si ya existen productos
+            existing = self.db.fetch_one("SELECT COUNT(*) as count FROM products")
+            if existing and existing['count'] > 0:
+                return
+            
+            # Crear categorías de muestra
+            categories = [
+                {'name': 'Repuestos Motor', 'description': 'Repuestos para motor'},
+                {'name': 'Filtros', 'description': 'Filtros de aceite, aire, combustible'},
+                {'name': 'Frenos', 'description': 'Sistema de frenos'},
+                {'name': 'Aceites', 'description': 'Aceites y lubricantes'}
+            ]
+            
+            for cat in categories:
+                self.db.execute("""
+                    INSERT INTO categories (name, description)
+                    VALUES (?, ?)
+                """, (cat['name'], cat['description']))
+            
+            # Obtener IDs de categorías
+            cat_ids = {}
+            for cat in categories:
+                cat_data = self.db.fetch_one("SELECT id FROM categories WHERE name = ?", (cat['name'],))
+                if cat_data:
+                    cat_ids[cat['name']] = cat_data['id']
+            
+            # Crear productos de muestra
+            sample_products = [
+                {
+                    'name': 'Filtro de Aceite Motor',
+                    'code': 'FO-001',
+                    'category_id': cat_ids.get('Filtros', 1),
+                    'stock': 25.0,
+                    'unit_price': 25000.0,
+                    'min_stock': 5.0,
+                    'max_stock': 50.0,
+                    'supplier': 'Repuestos Chile',
+                    'description': 'Filtro de aceite para motor 4 cilindros'
+                },
+                {
+                    'name': 'Aceite Motor 5W-30',
+                    'code': 'AM-002',
+                    'category_id': cat_ids.get('Aceites', 1),
+                    'stock': 15.0,
+                    'unit_price': 8000.0,
+                    'min_stock': 3.0,
+                    'max_stock': 30.0,
+                    'supplier': 'Lubricantes Pro',
+                    'description': 'Aceite sintético 5W-30 1 litro'
+                },
+                {
+                    'name': 'Pastillas de Freno Delanteras',
+                    'code': 'PF-003',
+                    'category_id': cat_ids.get('Frenos', 1),
+                    'stock': 8.0,
+                    'unit_price': 45000.0,
+                    'min_stock': 2.0,
+                    'max_stock': 20.0,
+                    'supplier': 'Frenos Max',
+                    'description': 'Pastillas de freno delanteras para vehículos medianos'
+                },
+                {
+                    'name': 'Filtro de Aire',
+                    'code': 'FA-004',
+                    'category_id': cat_ids.get('Filtros', 1),
+                    'stock': 12.0,
+                    'unit_price': 18000.0,
+                    'min_stock': 3.0,
+                    'max_stock': 25.0,
+                    'supplier': 'Filtros Chile',
+                    'description': 'Filtro de aire para motor'
+                },
+                {
+                    'name': 'Bujías de Encendido',
+                    'code': 'BE-005',
+                    'category_id': cat_ids.get('Repuestos Motor', 1),
+                    'stock': 20.0,
+                    'unit_price': 12000.0,
+                    'min_stock': 5.0,
+                    'max_stock': 40.0,
+                    'supplier': 'Encendido Pro',
+                    'description': 'Bujías de encendido estándar'
+                }
+            ]
+            
+            for product in sample_products:
+                self.db.execute("""
+                    INSERT INTO products (name, code, category_id, stock, unit_price, min_stock, max_stock, supplier, description)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (product['name'], product['code'], product['category_id'], product['stock'], 
+                      product['unit_price'], product['min_stock'], product['max_stock'], 
+                      product['supplier'], product['description']))
+            
+        except Exception as e:
+            print(f"Error creando productos de muestra: {e}")
     
     def on_product_select(self, event):
         """Manejar selección de producto"""
@@ -205,7 +304,6 @@ class EnhancedSalesModule:
             values = item['values']
             
             product_id = values[0]
-            product_type = values[5]  # "Producto" o "Sobrante"
             unit_price = float(values[4].replace('$', ''))
             
             qty_sold = float(self.qty_sold_entry.get() or 0)
@@ -223,15 +321,12 @@ class EnhancedSalesModule:
             client_info = self.client_var.get().split(' - ')
             client_id = int(client_info[0])
             
-            # Procesar según tipo
-            if product_type == "Sobrante":
-                self.process_remainder_sale(product_id, client_id, qty_sold, qty_used, unit_price)
-            else:
-                self.process_regular_sale(product_id, client_id, qty_sold, qty_used, unit_price)
+            # Procesar venta
+            self.process_regular_sale(product_id, client_id, qty_sold, qty_used, unit_price)
             
             # Limpiar formulario y recargar
             self.clear_form()
-            self.load_products()
+            self.load_products_async()
             
             messagebox.showinfo("Éxito", "Venta procesada correctamente")
             
@@ -253,12 +348,11 @@ class EnhancedSalesModule:
         # Registrar venta
         cursor = self.db.execute("""
             INSERT INTO sales (client_id, product_id, quantity_sold, quantity_used, 
-                             quantity_remainder, unit_price, total_price, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                             quantity_remainder, unit_price, total_price, notes, sale_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (client_id, product_id, qty_sold, qty_used, 
-              qty_sold - qty_used, unit_price, total_price, self.notes_entry.get()))
-        
-        sale_id = cursor.lastrowid
+              qty_sold - qty_used, unit_price, total_price, self.notes_entry.get(),
+              datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         
         # Actualizar stock del producto
         self.db.execute("""
@@ -267,51 +361,34 @@ class EnhancedSalesModule:
         
         # Crear sobrante si hay diferencia
         if qty_sold > qty_used:
-            self.remainders_manager.create_remainder_from_sale(
-                sale_id, product_id, qty_sold, qty_used, unit_price
-            )
-        
-        # Actualizar análisis
-        self.analytics.update_product_analytics(product_id, qty_used, total_price)
+            self.create_remainder_from_sale(cursor.lastrowid, product_id, qty_sold, qty_used, unit_price)
     
-    def process_remainder_sale(self, remainder_id_str, client_id, qty_sold, qty_used, unit_price):
-        """Procesar venta de sobrante"""
-        # Extraer ID del sobrante (quitar prefijo R)
-        remainder_id = int(remainder_id_str[1:])
+    def create_remainder_from_sale(self, sale_id, product_id, quantity_sold, quantity_used, unit_price):
+        """Crear sobrante cuando se vende más material del que se usa"""
+        if quantity_sold <= quantity_used:
+            return None  # No hay sobrante
         
-        # Obtener información del sobrante
-        remainder = self.db.fetch_one("""
-            SELECT * FROM material_remainders WHERE id = ?
-        """, (remainder_id,))
+        quantity_remainder = quantity_sold - quantity_used
         
-        if not remainder or remainder['quantity_available'] < qty_sold:
-            raise Exception("Sobrante insuficiente")
-        
-        # Calcular totales
-        total_price = qty_sold * unit_price
-        
-        # Registrar venta
-        cursor = self.db.execute("""
-            INSERT INTO sales (client_id, product_id, quantity_sold, quantity_used, 
-                             quantity_remainder, unit_price, total_price, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (client_id, remainder['product_id'], qty_sold, qty_used, 
-              qty_sold - qty_used, unit_price, total_price, 
-              f"Venta de sobrante #{remainder_id} - {self.notes_entry.get()}"))
-        
-        sale_id = cursor.lastrowid
-        
-        # Usar el sobrante
-        self.remainders_manager.use_remainder(remainder_id, qty_sold)
-        
-        # Si hay nueva diferencia, crear nuevo sobrante
-        if qty_sold > qty_used:
-            self.remainders_manager.create_remainder_from_sale(
-                sale_id, remainder['product_id'], qty_sold, qty_used, unit_price
-            )
-        
-        # Actualizar análisis
-        self.analytics.update_product_analytics(remainder['product_id'], qty_used, total_price)
+        try:
+            # Crear registro de sobrante
+            self.db.execute("""
+                INSERT INTO material_remainders 
+                (original_sale_id, product_id, quantity_available, unit_price, notes, created_date)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (sale_id, product_id, quantity_remainder, unit_price, 
+                  f"Sobrante de venta - Vendido: {quantity_sold}, Usado: {quantity_used}",
+                  datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            
+            # Actualizar el stock del producto original agregando el sobrante
+            self.db.execute("""
+                UPDATE products 
+                SET stock = stock + ? 
+                WHERE id = ?
+            """, (quantity_remainder, product_id))
+            
+        except Exception as e:
+            print(f"Error creando sobrante: {e}")
     
     def clear_form(self):
         """Limpiar formulario"""

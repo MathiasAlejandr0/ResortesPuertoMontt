@@ -15,9 +15,9 @@ class SuppliersModule:
     
     def create_widgets(self):
         """Crear todos los widgets del módulo"""
-        # Frame principal
-        main_frame = create_styled_frame(self.frame, bg=COLORS['white'])
-        main_frame.pack(fill='both', expand=True, padx=15, pady=15)
+        # Frame principal centrado
+        main_frame = create_styled_frame(self.frame, bg=COLORS['bg_primary'])
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
         
         # Título
         title_label = create_styled_label(
@@ -177,15 +177,10 @@ class SuppliersModule:
             # Obtener proveedores
             suppliers = self.db.fetch_all("SELECT * FROM suppliers ORDER BY name")
             
-            # Si no hay proveedores, crear algunos de ejemplo
-            if not suppliers:
-                self.create_sample_suppliers()
-                suppliers = self.db.fetch_all("SELECT * FROM suppliers ORDER BY name")
-            
             for supplier in suppliers:
                 # Resaltar proveedores inactivos
                 tags = []
-                if supplier['status'] == 'Inactivo':
+                if supplier.get('status') == 'Inactivo':
                     tags = ['inactive']
                 
                 self.suppliers_tree.insert('', 'end', values=(
@@ -196,7 +191,7 @@ class SuppliersModule:
                     supplier['email'] or '',
                     supplier['address'] or '',
                     supplier['contact_person'] or '',
-                    supplier['status'] or 'Activo'
+                    supplier.get('status', 'Activo') or 'Activo'
                 ), tags=tags)
             
             # Configurar colores para proveedores inactivos
@@ -205,20 +200,6 @@ class SuppliersModule:
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar proveedores: {str(e)}")
     
-    def create_sample_suppliers(self):
-        """Crear proveedores de ejemplo"""
-        sample_suppliers = [
-            ('Repuestos Auto S.A.', '76.123.456-7', '+56 2 2345 6789', 'ventas@repuestosauto.cl', 'Av. Providencia 123, Santiago', 'Juan Pérez', 'Activo'),
-            ('Filtros del Sur Ltda.', '76.234.567-8', '+56 2 3456 7890', 'contacto@filtrosdelsur.cl', 'Calle Los Robles 456, Valdivia', 'María González', 'Activo'),
-            ('Neumáticos Premium', '76.345.678-9', '+56 2 4567 8901', 'info@neumaticospremium.cl', 'Ruta 5 Sur Km 890, Temuco', 'Carlos Silva', 'Activo'),
-            ('Aceites Industriales', '76.456.789-0', '+56 2 5678 9012', 'ventas@aceitesind.cl', 'Zona Industrial 789, Concepción', 'Ana Rodríguez', 'Inactivo')
-        ]
-        
-        for supplier_data in sample_suppliers:
-            self.db.execute("""
-                INSERT INTO suppliers (name, rut, phone, email, address, contact_person, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (*supplier_data, datetime.now().isoformat()))
     
     def search_suppliers(self, event=None):
         """Buscar proveedores"""

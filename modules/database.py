@@ -66,6 +66,17 @@ class Database:
                     email TEXT,
                     address TEXT,
                     rut TEXT UNIQUE,
+                    status TEXT DEFAULT 'Activo',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Tabla de categorías
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS categories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    description TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -77,14 +88,17 @@ class Database:
                     code TEXT UNIQUE NOT NULL,
                     name TEXT NOT NULL,
                     description TEXT,
-                    lot TEXT,
+                    category_id INTEGER,
+                    category TEXT,
                     supplier_id INTEGER,
                     unit_price REAL NOT NULL,
-                    stock INTEGER DEFAULT 0,
-                    min_stock INTEGER DEFAULT 0,
-                    max_stock INTEGER DEFAULT 1000,
-                    category TEXT,
+                    stock REAL DEFAULT 0,
+                    min_stock REAL DEFAULT 0,
+                    max_stock REAL DEFAULT 1000,
+                    supplier TEXT,
+                    lot TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (category_id) REFERENCES categories (id),
                     FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
                 )
             """)
@@ -113,6 +127,8 @@ class Database:
                     rut TEXT UNIQUE,
                     position TEXT,
                     hourly_rate REAL DEFAULT 0,
+                    salary REAL DEFAULT 0,
+                    status TEXT DEFAULT 'Activo',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -138,10 +154,13 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     client_id INTEGER,
                     machine_id INTEGER,
+                    worker_id INTEGER,
                     description TEXT NOT NULL,
                     start_date TIMESTAMP,
                     end_date TIMESTAMP,
                     status TEXT DEFAULT 'pendiente',
+                    priority INTEGER DEFAULT 1,
+                    vehicle_info TEXT,
                     total_cost REAL DEFAULT 0,
                     labor_cost REAL DEFAULT 0,
                     parts_cost REAL DEFAULT 0,
@@ -149,7 +168,8 @@ class Database:
                     notes TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (client_id) REFERENCES clients (id),
-                    FOREIGN KEY (machine_id) REFERENCES machines (id)
+                    FOREIGN KEY (machine_id) REFERENCES machines (id),
+                    FOREIGN KEY (worker_id) REFERENCES workers (id)
                 )
             """)
             
@@ -205,12 +225,14 @@ class Database:
                 CREATE TABLE IF NOT EXISTS quotes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     client_id INTEGER,
+                    quote_number TEXT UNIQUE,
                     quote_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     description TEXT NOT NULL,
                     labor_cost REAL DEFAULT 0,
                     parts_cost REAL DEFAULT 0,
                     calculated_total REAL DEFAULT 0,
                     final_price REAL DEFAULT 0,
+                    total_amount REAL DEFAULT 0,
                     status TEXT DEFAULT 'Pendiente',
                     valid_until TIMESTAMP,
                     notes TEXT,
@@ -319,6 +341,49 @@ class Database:
                     is_read BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (product_id) REFERENCES products (id)
+                )
+            """)
+            
+            # Tabla de configuración del sistema
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS system_config (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT UNIQUE NOT NULL,
+                    value TEXT NOT NULL,
+                    config_data TEXT,
+                    description TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Tabla de logs del sistema
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    action TEXT DEFAULT 'system',
+                    module TEXT DEFAULT 'system',
+                    level TEXT DEFAULT 'INFO',
+                    message TEXT,
+                    details TEXT,
+                    ip_address TEXT,
+                    thread_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """)
+            
+            # Tabla de notificaciones
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    title TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    type TEXT DEFAULT 'info',
+                    is_read BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
                 )
             """)
             
