@@ -75,8 +75,8 @@ Sistema integral de gestión empresarial diseñado específicamente para tallere
 ## 🔑 Acceso al Sistema
 
 ### Usuario Administrador
-- **Usuario**: `admin`
-- **Contraseña**: `admin123`
+- **Usuario**: `xxxx`
+- **Contraseña**: `xxxx`
 - **Rol**: Administrador completo
 
 ## 📱 Módulos del Sistema
@@ -191,6 +191,6 @@ Este proyecto está desarrollado específicamente para Resortes Puerto Montt. To
 
 ---
 
-**Desarrollado con ❤️ para Resortes Puerto Montt**
+**Desarrollado por Mathias Jara Alvarado FullStack Developer para Resortes Puerto Montt**
 
 *Sistema de gestión empresarial profesional para talleres mecánicos*
