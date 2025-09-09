@@ -28,17 +28,26 @@ class Database:
             return None
     
     def fetch_all(self, query, params=()):
-        """Obtener todos los resultados"""
+        """Obtener todos los resultados como diccionarios"""
         cursor = self.execute(query, params)
         if cursor:
-            return cursor.fetchall()
+            # Obtener nombres de columnas
+            columns = [description[0] for description in cursor.description]
+            # Convertir a lista de diccionarios
+            rows = cursor.fetchall()
+            return [dict(zip(columns, row)) for row in rows]
         return []
     
     def fetch_one(self, query, params=()):
-        """Obtener un resultado"""
+        """Obtener un resultado como diccionario"""
         cursor = self.execute(query, params)
         if cursor:
-            return cursor.fetchone()
+            # Obtener nombres de columnas
+            columns = [description[0] for description in cursor.description]
+            # Convertir a diccionario
+            row = cursor.fetchone()
+            if row:
+                return dict(zip(columns, row))
         return None
     
     def create_tables(self):
@@ -102,6 +111,32 @@ class Database:
                     FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
                 )
             """)
+            
+            # Agregar campos faltantes a la tabla products si no existen
+            try:
+                self.execute("ALTER TABLE products ADD COLUMN sku TEXT")
+            except:
+                pass
+            try:
+                self.execute("ALTER TABLE products ADD COLUMN brand TEXT")
+            except:
+                pass
+            try:
+                self.execute("ALTER TABLE products ADD COLUMN purchase_price REAL DEFAULT 0")
+            except:
+                pass
+            try:
+                self.execute("ALTER TABLE products ADD COLUMN sale_price REAL DEFAULT 0")
+            except:
+                pass
+            try:
+                self.execute("ALTER TABLE products ADD COLUMN location TEXT")
+            except:
+                pass
+            try:
+                self.execute("ALTER TABLE quotes ADD COLUMN parts_list TEXT")
+            except:
+                pass
             
             # Tabla de clientes
             self.execute("""
@@ -236,6 +271,7 @@ class Database:
                     status TEXT DEFAULT 'Pendiente',
                     valid_until TIMESTAMP,
                     notes TEXT,
+                    parts_list TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (client_id) REFERENCES clients (id)
                 )

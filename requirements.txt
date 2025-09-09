@@ -1,7 +1,41 @@
-tkinter
-sqlite3
-openpyxl==3.1.2
-reportlab==4.0.4
-pillow==10.0.1
-datetime
-pandas==2.1.1
+# Sistema de Gestión - Taller Mecánico Resortes Puerto Montt
+# Dependencias del proyecto
+
+# Interfaz gráfica
+tkinter  # Incluido con Python
+
+# Base de datos
+sqlite3  # Incluido con Python
+
+# Generación de PDFs
+reportlab>=4.0.0
+
+# Procesamiento de imágenes
+Pillow>=10.0.0
+
+# Manejo de datos
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Utilidades de fecha y hora
+python-dateutil>=2.8.0
+
+# Encriptación de contraseñas
+bcrypt>=4.0.0
+
+# Validación de datos
+email-validator>=2.0.0
+
+# Manejo de archivos Excel
+openpyxl>=3.1.0
+xlrd>=2.0.0
+
+# Logging avanzado
+colorlog>=6.7.0
+
+# Utilidades del sistema
+psutil>=5.9.0
+
+# Desarrollo y testing (opcional)
+pytest>=7.0.0
+pytest-cov>=4.0.0

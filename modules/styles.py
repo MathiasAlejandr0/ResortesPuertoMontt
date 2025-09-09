@@ -243,7 +243,9 @@ def create_modern_header(parent, title, subtitle=None, **kwargs):
             text=subtitle,
             font=FONTS['body'],
             fg=COLORS['text_light'],
-            bg=COLORS['primary']
+            bg=COLORS['primary'],
+            wraplength=800,  # Permitir salto de línea
+            justify='left'
         )
         subtitle_label.pack(anchor='w', pady=(5, 0))
     

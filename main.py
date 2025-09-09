@@ -59,17 +59,17 @@ class TallerMecanicoApp:
             pass  # Continuar sin icono si hay error
     
     def show_login(self):
-        """Mostrar pantalla de login"""
-        # Configurar ventana de login pequeña
-        self.root.geometry("400x500")
+        """Mostrar pantalla de login moderna y centrada"""
+        # Configurar ventana de login
+        self.root.geometry("500x650")
         self.root.resizable(False, False)
         
         # Centrar ventana de login
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        x = (screen_width - 400) // 2
-        y = (screen_height - 500) // 2
-        self.root.geometry(f"400x500+{x}+{y}")
+        x = (screen_width - 500) // 2
+        y = (screen_height - 650) // 2
+        self.root.geometry(f"500x650+{x}+{y}")
         
         # Frame principal del login
         self.login_frame = tk.Frame(self.root, bg=COLORS['primary'])
@@ -79,12 +79,10 @@ class TallerMecanicoApp:
         main_container = tk.Frame(self.login_frame, bg=COLORS['primary'])
         main_container.place(relx=0.5, rely=0.5, anchor='center')
         
-        # Logo (simplificado)
-        logo_label = tk.Label(
+        # Logo de la empresa
+        logo_label = self.logo_manager.create_logo_label(
             main_container,
-            text="🔧",
-            font=('Segoe UI', 48),
-            fg='white',
+            size='large',
             bg=COLORS['primary']
         )
         logo_label.pack(pady=(0, 20))
@@ -93,7 +91,7 @@ class TallerMecanicoApp:
         title_label = tk.Label(
             main_container,
             text="RESORTES PUERTO MONTT",
-            font=('Segoe UI', 18, 'bold'),
+            font=('Segoe UI', 20, 'bold'),
             fg='white',
             bg=COLORS['primary']
         )
@@ -102,31 +100,25 @@ class TallerMecanicoApp:
         subtitle_label = tk.Label(
             main_container,
             text="Sistema de Gestión Empresarial",
-            font=('Segoe UI', 12),
+            font=('Segoe UI', 14),
             fg='white',
             bg=COLORS['primary']
         )
-        subtitle_label.pack(pady=(0, 30))
+        subtitle_label.pack(pady=(0, 40))
         
-        # Formulario de login
+        # Formulario de login centrado
         form_frame = tk.Frame(main_container, bg='white', relief='solid', bd=1)
-        form_frame.pack(pady=20, padx=20, fill='x')
-        
-        # Centrar el formulario
-        form_frame.pack_configure(pady=20, padx=20)
+        form_frame.pack(pady=20, padx=20)
         
         # Título del formulario
         form_title = tk.Label(
             form_frame,
             text="Iniciar Sesión",
-            font=('Segoe UI', 16, 'bold'),
+            font=('Segoe UI', 18, 'bold'),
             fg=COLORS['text_primary'],
             bg='white'
         )
-        form_title.pack(pady=(20, 20))
-        
-        # Centrar título
-        form_title.pack_configure(anchor='center')
+        form_title.pack(pady=(30, 20))
         
         # Campo usuario
         user_frame = tk.Frame(form_frame, bg='white')
@@ -214,9 +206,9 @@ class TallerMecanicoApp:
         """, (username, hashed_password))
         
         if user:
-            self.current_user = user[0]
-            self.current_role = user[1]
-            self.current_full_name = user[2]
+            self.current_user = user['username']
+            self.current_role = user['role']
+            self.current_full_name = user['full_name']
             
             # Limpiar campos
             self.username_entry.delete(0, tk.END)
