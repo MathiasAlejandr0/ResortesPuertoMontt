@@ -1,0 +1,1511 @@
+import React, { useState, useEffect, useMemo, useDeferredValue, startTransition, useLayoutEffect, useRef } from 'react';
+import { X, User, Car, Calendar, DollarSign, Plus, Search, Wrench, Send, Clock, AlertTriangle, FileText } from 'lucide-react';
+import { Cliente, Vehiculo, OrdenTrabajo, Repuesto, Cotizacion } from '../types';
+import { useApp } from '../contexts/AppContext';
+import { notify, Logger, formatearRUT, Validation } from '../utils/cn';
+
+interface OrdenFormProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (orden: OrdenTrabajo) => void;
+}
+
+interface RepuestoOrden {
+  id: number;
+  nombre: string;
+  precio: number;
+  cantidad: number;
+  subtotal: number;
+}
+
+interface DetalleOrdenForm {
+  tipo: 'servicio' | 'repuesto';
+  servicioId?: number;
+  repuestoId?: number;
+  cantidad: number;
+  precio: number;
+  subtotal: number;
+  descripcion: string;
+}
+
+export default function OrdenFormMejorado({ 
+  isOpen, 
+  onClose, 
+  onSave
+}: OrdenFormProps) {
+  // Usar el contexto para acceder a los datos
+  const { clientes, vehiculos, repuestos, cotizaciones, addCliente, addVehiculo, refreshRepuestos } = useApp();
+  const [step, setStep] = useState(1); // 1: Cliente, 2: Vehículo, 3: Trabajo y Repuestos, 4: Resumen
+  const [tipoCliente, setTipoCliente] = useState<'nuevo' | 'existente'>('existente');
+  const [busquedaCliente, setBusquedaCliente] = useState('');
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(null);
+  const [nuevoCliente, setNuevoCliente] = useState<Cliente>({
+    nombre: '',
+    rut: '',
+    telefono: '',
+    email: '',
+    direccion: '',
+    activo: true
+  });
+  const [vehiculoSeleccionado, setVehiculoSeleccionado] = useState<Vehiculo | null>(null);
+  const [nuevoVehiculo, setNuevoVehiculo] = useState<Vehiculo>({
+    clienteId: 0,
+    marca: '',
+    modelo: '',
+    año: new Date().getFullYear(),
+    patente: '',
+    color: '',
+    kilometraje: 0,
+    observaciones: '',
+    activo: true
+  });
+  const [descripcionTrabajo, setDescripcionTrabajo] = useState('');
+  const [usandoCotizacion, setUsandoCotizacion] = useState(false);
+  const [repuestosSeleccionados, setRepuestosSeleccionados] = useState<RepuestoOrden[]>([]);
+  const [detallesOrden, setDetallesOrden] = useState<DetalleOrdenForm[]>([]);
+  const [precioFinal, setPrecioFinal] = useState('');
+  const [observaciones, setObservaciones] = useState('');
+  const [fotos, setFotos] = useState<{ name: string; dataUrl: string }[]>([]);
+  const [prioridad, setPrioridad] = useState<'baja' | 'normal' | 'alta' | 'urgente'>('normal');
+  const [tecnicoAsignado, setTecnicoAsignado] = useState('');
+  const [kilometrajeEntrada, setKilometrajeEntrada] = useState<number | ''>('');
+  const [fechaEntrega, setFechaEntrega] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [totalBloqueado, setTotalBloqueado] = useState(false);
+  const [cotizacionesCliente, setCotizacionesCliente] = useState<Cotizacion[]>([]);
+  const [cotizacionSeleccionada, setCotizacionSeleccionada] = useState<Cotizacion | null>(null);
+  const [modoVehiculo, setModoVehiculo] = useState<'existente' | 'nuevo'>('existente');
+
+  // Vehículos del cliente seleccionado
+  const vehiculosDelCliente = useMemo(() => {
+    if (!clienteSeleccionado?.id) return [] as Vehiculo[];
+    return vehiculos.filter(v => v.clienteId === clienteSeleccionado.id);
+  }, [vehiculos, clienteSeleccionado?.id]);
+
+  // Al cambiar cliente, resetear selección de vehículo y modo
+  useEffect(() => {
+    setVehiculoSeleccionado(null);
+    if (vehiculosDelCliente.length > 0) {
+      setModoVehiculo('existente');
+    } else {
+      setModoVehiculo('nuevo');
+    }
+  }, [clienteSeleccionado?.id, vehiculosDelCliente.length]);
+
+  // Filtrar cotizaciones cuando se selecciona un cliente
+  useEffect(() => {
+    if (clienteSeleccionado) {
+      const cotizacionesClienteSeleccionado = cotizaciones.filter(
+        c => c.clienteId === clienteSeleccionado.id
+      );
+      setCotizacionesCliente(cotizacionesClienteSeleccionado);
+    } else {
+      setCotizacionesCliente([]);
+      setCotizacionSeleccionada(null);
+    }
+  }, [clienteSeleccionado, cotizaciones]);
+
+  // Función para importar datos de una cotización
+  const importarDesdeCotizacion = async (cotiParam?: Cotizacion | null) => {
+    const cotizacion = cotiParam ?? cotizacionSeleccionada;
+    if (!cotizacion) return;
+    
+    // Importar cliente
+    const cliente = clientes.find(c => c.id === cotizacion.clienteId);
+    if (cliente) {
+      setClienteSeleccionado(cliente);
+      setTipoCliente('existente');
+    }
+
+    // Importar vehículo
+    const vehiculo = vehiculos.find(v => v.id === cotizacion.vehiculoId);
+    if (vehiculo) {
+      setVehiculoSeleccionado(vehiculo);
+      setModoVehiculo('existente');
+    } else {
+      // Si no se encuentra el vehículo, usar modo nuevo
+      setModoVehiculo('nuevo');
+      setVehiculoSeleccionado(null);
+      // Los datos del vehículo se pueden obtener del vehículo asociado si existe en la BD
+      // Por ahora dejamos campos vacíos para que el usuario los complete
+      const nuevoVehiculo: Vehiculo = {
+        clienteId: cotizacion.clienteId,
+        marca: '',
+        modelo: '',
+        año: new Date().getFullYear(),
+        patente: '',
+        color: '',
+        kilometraje: 0,
+        observaciones: '',
+        activo: true
+      };
+      setNuevoVehiculo(nuevoVehiculo);
+    }
+
+    // Importar descripción
+    setDescripcionTrabajo(cotizacion.descripcion || '');
+
+    // Importar detalles de la cotización (tanto servicios como repuestos)
+    try {
+      if (cotizacion.id) {
+        Logger.log('📥 Importando detalles de cotización ID:', cotizacion.id);
+        const detalles = await window.electronAPI.getDetallesCotizacion(cotizacion.id);
+        Logger.log('📥 Detalles obtenidos de cotización:', detalles?.length || 0, detalles);
+        
+        if (Array.isArray(detalles) && detalles.length > 0) {
+          Logger.debug('📥 OrdenFormMejorado: Detalles recibidos de cotización:', detalles);
+          
+          // Convertir todos los detalles a formato DetalleOrdenForm
+          const detallesImportados: DetalleOrdenForm[] = detalles.map((d: any) => {
+            const detalle = {
+              tipo: d.tipo || 'repuesto',
+              servicioId: d.servicioId || undefined,
+              repuestoId: d.repuestoId || undefined,
+              cantidad: d.cantidad || 1,
+              precio: d.precio || 0,
+              subtotal: d.subtotal || ((d.cantidad || 1) * (d.precio || 0)),
+              descripcion: d.descripcion || ''
+            };
+            Logger.debug('  → Detalle convertido:', detalle);
+            return detalle;
+          });
+          
+          Logger.info('✅ Detalles importados convertidos:', detallesImportados.length, detallesImportados);
+          Logger.debug('📥 OrdenFormMejorado: Estableciendo', detallesImportados.length, 'detalles en detallesOrden');
+          setDetallesOrden(detallesImportados);
+          
+          // También mantener repuestos para compatibilidad con UI
+          const repuestosDesdeDetalles = detalles
+            .filter((d: any) => d.tipo === 'repuesto')
+            .map((d: any) => ({
+              id: d.repuestoId || 0,
+              nombre: d.descripcion || '',
+              precio: d.precio || 0,
+              cantidad: d.cantidad || 1,
+              subtotal: d.subtotal || ((d.cantidad || 1) * (d.precio || 0))
+            }));
+          Logger.debug('📥 OrdenFormMejorado: Estableciendo', repuestosDesdeDetalles.length, 'repuestos en repuestosSeleccionados');
+          setRepuestosSeleccionados(repuestosDesdeDetalles);
+          
+          Logger.info('✅ Repuestos seleccionados actualizados:', repuestosDesdeDetalles.length);
+        } else {
+          Logger.warn('⚠️ No se encontraron detalles en la cotización');
+          setDetallesOrden([]);
+          setRepuestosSeleccionados([]);
+        }
+      } else {
+        Logger.warn('⚠️ Cotización sin ID, no se pueden importar detalles');
+      }
+    } catch (e) {
+      Logger.error('❌ Error importando detalles de cotización:', e);
+      // Si falla, seguimos sin detalles importados para no bloquear al usuario
+      setDetallesOrden([]);
+      setRepuestosSeleccionados([]);
+    }
+
+    // Importar total como precio final
+    if (cotizacion.total) {
+      setPrecioFinal(String(cotizacion.total));
+      setTotalBloqueado(true);
+    }
+
+    // Avanzar directo al resumen para no volver a pedir la descripción
+    setUsandoCotizacion(true);
+    setStep(4);
+
+    // Limpiar selección
+    setCotizacionSeleccionada(null);
+    setCotizacionesCliente([]);
+  };
+
+  const handleFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const allowed = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+    const max = 10;
+    const toProcess = Array.from(files).slice(0, max - fotos.length);
+    toProcess.forEach((file) => {
+      if (!allowed.includes(file.type)) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        setFotos((prev) => [...prev, { name: file.name, dataUrl }]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeFoto = (idx: number) => setFotos((prev) => prev.filter((_, i) => i !== idx));
+
+  // Refs para los inputs principales
+  const inputBusquedaClienteRef = useRef<HTMLInputElement>(null);
+  const inputNombreClienteRef = useRef<HTMLInputElement>(null);
+  const inputPatenteRef = useRef<HTMLInputElement>(null);
+  const textareaDescripcionRef = useRef<HTMLTextAreaElement>(null);
+
+  // Resetear formulario cuando se abre
+  // Usar useEffect en lugar de useLayoutEffect para evitar bloquear el render inicial
+  useEffect(() => {
+    if (isOpen) {
+      // Resetear TODOS los estados cuando se abre
+      setIsLoading(false);
+      setStep(1);
+      setTipoCliente('existente');
+      setBusquedaCliente('');
+      setBusquedaRepuesto('');
+      setClienteSeleccionado(null);
+      setNuevoCliente({
+        nombre: '',
+        rut: '',
+        telefono: '',
+        email: '',
+        direccion: '',
+        activo: true
+      });
+      setVehiculoSeleccionado(null);
+      setNuevoVehiculo({
+        clienteId: 0,
+        marca: '',
+        modelo: '',
+        año: new Date().getFullYear(),
+        patente: '',
+        color: '',
+        kilometraje: 0,
+        observaciones: '',
+        activo: true
+      });
+      setDescripcionTrabajo('');
+      setRepuestosSeleccionados([]);
+      // Resetear detallesOrden cuando se cierra/abre el modal
+      setDetallesOrden([]);
+      setPrecioFinal('');
+      setObservaciones('');
+      setPrioridad('normal');
+      setTecnicoAsignado('');
+      setKilometrajeEntrada('');
+      setFechaEntrega('');
+      setCotizacionesCliente([]);
+      setCotizacionSeleccionada(null);
+      setUsandoCotizacion(false);
+      setTotalBloqueado(false);
+      setFotos([]);
+    }
+  }, [isOpen]);
+
+  // Enfocar el primer input cuando el modal se abre y el step cambia
+  // Usar doble requestAnimationFrame para asegurar que el DOM esté completamente listo
+  useEffect(() => {
+    if (isOpen) {
+      // Usar doble requestAnimationFrame para asegurar que el DOM esté completamente renderizado
+      let timeoutId: NodeJS.Timeout;
+      let rafId2: number;
+      const rafId1 = requestAnimationFrame(() => {
+        rafId2 = requestAnimationFrame(() => {
+          timeoutId = setTimeout(() => {
+            if (step === 1) {
+              if (tipoCliente === 'existente') {
+                inputBusquedaClienteRef.current?.focus();
+              } else {
+                inputNombreClienteRef.current?.focus();
+              }
+            } else if (step === 2) {
+              if (modoVehiculo === 'nuevo') {
+                inputPatenteRef.current?.focus();
+              }
+            } else if (step === 3) {
+              // Para el textarea, asegurar que sea interactivo
+              textareaDescripcionRef.current?.focus();
+              // Forzar interacción para desbloquear el textarea
+              textareaDescripcionRef.current?.click();
+            }
+          }, 100);
+        });
+      });
+      
+      // Retornar función de limpieza
+      return () => {
+        cancelAnimationFrame(rafId1);
+        if (rafId2) cancelAnimationFrame(rafId2);
+        if (timeoutId) clearTimeout(timeoutId);
+      };
+    }
+  }, [isOpen, step, tipoCliente, modoVehiculo]);
+
+  // Cargar datos en background DESPUÉS del render (sin bloquear)
+  useEffect(() => {
+    if (isOpen) {
+      // Cargar repuestos en background (después de que el formulario ya esté renderizado)
+      // Usar un delay más largo para asegurar que el formulario ya está interactivo
+      const timeoutId = setTimeout(() => {
+        startTransition(() => {
+          try { 
+            void refreshRepuestos(); 
+          } catch {} 
+        });
+      }, 500); // Aumentado a 500ms para dar más tiempo al render inicial
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isOpen, refreshRepuestos]);
+
+  // Generar número de orden automático
+  const generarNumeroOrden = () => {
+    const fecha = new Date();
+    const año = fecha.getFullYear();
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    const dia = String(fecha.getDate()).padStart(2, '0');
+    const numero = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `OT-${año}-${mes}${dia}-${numero}`;
+  };
+
+  // Pre-calcular clientes únicos UNA VEZ (evita O(n²) en cada filtro)
+  const clientesUnicos = useMemo(() => {
+    if (!clientes || clientes.length === 0) return [];
+    const seen = new Set<number>();
+    return clientes.filter(cliente => {
+      if (cliente.id && !seen.has(cliente.id)) {
+        seen.add(cliente.id);
+        return true;
+      }
+      return false;
+    });
+  }, [clientes]);
+
+  // Filtrar clientes - SIEMPRE sincrónico y rápido
+  const clientesFiltrados = useMemo(() => {
+    // Si no hay clientes todavía, retornar vacío inmediatamente
+    if (!clientesUnicos || clientesUnicos.length === 0) {
+      return [];
+    }
+    
+    const busquedaTrimmed = busquedaCliente.trim();
+    
+    // Si no hay búsqueda, limitar para no bloquear
+    if (!busquedaTrimmed) {
+      return clientesUnicos.slice(0, 10);
+    }
+    
+    // Si hay búsqueda, filtrar rápidamente
+    const busquedaLower = busquedaTrimmed.toLowerCase();
+    return clientesUnicos.filter(cliente =>
+      cliente.nombre.toLowerCase().includes(busquedaLower) ||
+      (cliente.rut && cliente.rut.includes(busquedaTrimmed)) ||
+      (cliente.telefono && cliente.telefono.includes(busquedaTrimmed))
+    );
+  }, [clientesUnicos, busquedaCliente]);
+
+  // Filtrar repuestos por búsqueda - SIEMPRE sincrónico y rápido
+  const [busquedaRepuesto, setBusquedaRepuesto] = useState('');
+  const repuestosFiltrados = useMemo(() => {
+    // Si no hay repuestos todavía, retornar vacío inmediatamente
+    if (!repuestos || repuestos.length === 0) {
+      return [];
+    }
+    
+    const termino = busquedaRepuesto.toLowerCase().trim();
+    if (termino) {
+      // Si hay búsqueda, filtrar
+      return repuestos.filter((repuesto) =>
+        repuesto.nombre.toLowerCase().includes(termino) ||
+        repuesto.codigo?.toLowerCase().includes(termino) ||
+        repuesto.categoria?.toLowerCase().includes(termino)
+      );
+    }
+    // Si no hay búsqueda, mostrar los primeros 10 repuestos para que el usuario vea que hay repuestos disponibles
+    return repuestos.slice(0, 10);
+  }, [repuestos, busquedaRepuesto]);
+
+  // Agregar repuesto a la orden
+  const agregarRepuesto = (repuesto: Repuesto) => {
+    const repuestoExistente = repuestosSeleccionados.find(r => r.id === repuesto.id);
+    if (repuestoExistente) {
+      setRepuestosSeleccionados(prev =>
+        prev.map(r =>
+          r.id === repuesto.id
+            ? { ...r, cantidad: r.cantidad + 1, subtotal: (r.cantidad + 1) * r.precio }
+            : r
+        )
+      );
+      // También actualizar en detallesOrden
+      setDetallesOrden(prev => {
+        const detalleExistente = prev.find(d => d.tipo === 'repuesto' && d.repuestoId === repuesto.id);
+        if (detalleExistente) {
+          return prev.map(d =>
+            d.tipo === 'repuesto' && d.repuestoId === repuesto.id
+              ? { ...d, cantidad: d.cantidad + 1, subtotal: (d.cantidad + 1) * d.precio }
+              : d
+          );
+        } else {
+          return [...prev, {
+            tipo: 'repuesto',
+            repuestoId: repuesto.id || 0,
+            cantidad: repuestoExistente.cantidad + 1,
+            precio: repuesto.precio || 0,
+            subtotal: (repuestoExistente.cantidad + 1) * (repuesto.precio || 0),
+            descripcion: repuesto.nombre
+          }];
+        }
+      });
+    } else {
+      const nuevoRepuesto: RepuestoOrden = {
+        id: repuesto.id || 0,
+        nombre: repuesto.nombre,
+        precio: repuesto.precio || 0,
+        cantidad: 1,
+        subtotal: repuesto.precio || 0
+      };
+      setRepuestosSeleccionados(prev => [...prev, nuevoRepuesto]);
+      // También agregar a detallesOrden
+      setDetallesOrden(prev => [...prev, {
+        tipo: 'repuesto',
+        repuestoId: repuesto.id || 0,
+        cantidad: 1,
+        precio: repuesto.precio || 0,
+        subtotal: repuesto.precio || 0,
+        descripcion: repuesto.nombre
+      }]);
+    }
+    setBusquedaRepuesto('');
+  };
+
+  // Actualizar cantidad de repuesto
+  const actualizarCantidadRepuesto = (id: number, cantidad: number) => {
+    if (cantidad <= 0) {
+      setRepuestosSeleccionados(prev => prev.filter(r => r.id !== id));
+      setDetallesOrden(prev => prev.filter(d => !(d.tipo === 'repuesto' && d.repuestoId === id)));
+    } else {
+      setRepuestosSeleccionados(prev =>
+        prev.map(r =>
+          r.id === id
+            ? { ...r, cantidad, subtotal: cantidad * r.precio }
+            : r
+        )
+      );
+      // También actualizar en detallesOrden
+      setDetallesOrden(prev =>
+        prev.map(d =>
+          d.tipo === 'repuesto' && d.repuestoId === id
+            ? { ...d, cantidad, subtotal: cantidad * d.precio }
+            : d
+        )
+      );
+    }
+  };
+
+  // Calcular subtotal de repuestos
+  const subtotalRepuestos = repuestosSeleccionados.reduce((total, repuesto) => total + repuesto.subtotal, 0);
+
+  // Función para validar formato de RUT (usa la función centralizada)
+  const validarRUT = (rut: string): boolean => {
+    if (!rut) return true; // Permitir RUT vacío
+    const resultado = Validation.rut(rut);
+    return resultado.valido;
+  };
+
+  // Función inteligente para encontrar o crear cliente
+  const encontrarOCrearCliente = async (clienteData: Cliente): Promise<Cliente> => {
+    // Buscar cliente existente por RUT o email
+    let clienteExistente = clientes.find(c => 
+      (clienteData.rut && c.rut === clienteData.rut) ||
+      (clienteData.email && c.email === clienteData.email)
+    );
+
+    if (clienteExistente) {
+      console.log('🔧 Cliente encontrado:', clienteExistente);
+      return clienteExistente;
+    }
+
+    // Si no existe, crear nuevo cliente
+    console.log('🔧 Creando nuevo cliente:', clienteData);
+    const nuevoCliente = await window.electronAPI.saveCliente(clienteData);
+    
+    // Actualizar el contexto con el nuevo cliente
+    await addCliente(nuevoCliente);
+    
+    return nuevoCliente;
+  };
+
+  // Función inteligente para encontrar o crear vehículo
+  const encontrarOCrearVehiculo = async (vehiculoData: Vehiculo, clienteId: number): Promise<Vehiculo> => {
+    // Buscar vehículo existente por patente
+    let vehiculoExistente = vehiculos.find(v => 
+      vehiculoData.patente && v.patente === vehiculoData.patente
+    );
+
+    if (vehiculoExistente) {
+      console.log('🔧 Vehículo encontrado:', vehiculoExistente);
+      return vehiculoExistente;
+    }
+
+    // Si no existe, crear nuevo vehículo
+    console.log('🔧 Creando nuevo vehículo:', vehiculoData);
+    const nuevoVehiculo = { ...vehiculoData, clienteId };
+    const vehiculoCreado = await window.electronAPI.saveVehiculo(nuevoVehiculo);
+    
+    // Actualizar el contexto con el nuevo vehículo
+    addVehiculo(vehiculoCreado);
+    
+    return vehiculoCreado;
+  };
+
+  // Manejar guardado de orden
+  const handleSave = async () => {
+    // Prevenir múltiples envíos
+    if (isLoading) {
+      return;
+    }
+    
+    setIsLoading(true);
+    try {
+      // Validar precio final (debe ser mayor a 0)
+      const precioFinalStr = typeof precioFinal === 'number' ? String(precioFinal) : (precioFinal || '');
+      const precioFinalNumero = Number(precioFinalStr.replace(/[^0-9]/g, ''));
+      if (!precioFinalNumero || precioFinalNumero <= 0) {
+        notify.error('Validación', 'Debes ingresar un precio final mayor a 0');
+        setIsLoading(false);
+        return;
+      }
+
+      let clienteFinal: Cliente;
+      let vehiculoFinal: Vehiculo;
+
+      // Lógica inteligente: usar cliente existente o crear automáticamente
+      if (tipoCliente === 'existente' && clienteSeleccionado) {
+        clienteFinal = clienteSeleccionado;
+      } else {
+        // Validar RUT si se proporciona
+        if (nuevoCliente.rut) {
+          const validacionRUT = Validation.rut(nuevoCliente.rut);
+          if (!validacionRUT.valido) {
+            notify.error('Validación', validacionRUT.mensaje || 'El RUT ingresado no es válido');
+            setIsLoading(false);
+            return;
+          }
+        }
+        
+        // Buscar cliente existente o crear automáticamente
+        clienteFinal = await encontrarOCrearCliente(nuevoCliente);
+      }
+
+      // Lógica inteligente: usar vehículo existente o crear automáticamente
+      if (vehiculoSeleccionado) {
+        vehiculoFinal = vehiculoSeleccionado;
+      } else {
+        // Validación mínima cuando se crea vehículo manualmente
+        const patenteOk = (nuevoVehiculo.patente || '').trim().length > 0;
+        const marcaOk = (nuevoVehiculo.marca || '').trim().length > 0;
+        const modeloOk = (nuevoVehiculo.modelo || '').trim().length > 0;
+        if (!patenteOk || !marcaOk || !modeloOk) {
+          notify.error('Validación', 'Debes ingresar Patente, Marca y Modelo del vehículo');
+          setStep(2);
+          setIsLoading(false);
+          return;
+        }
+        // Crear vehículo automáticamente si no existe
+        vehiculoFinal = await encontrarOCrearVehiculo(nuevoVehiculo, clienteFinal.id!);
+      }
+
+      // Normalizar prioridad a formato minúsculas esperado por el esquema de validación
+      const prioridadMap: Record<string, 'baja' | 'media' | 'alta' | 'urgente'> = {
+        'Baja': 'baja',
+        'baja': 'baja',
+        'Normal': 'media',
+        'normal': 'media',
+        'Media': 'media',
+        'media': 'media',
+        'Alta': 'alta',
+        'alta': 'alta',
+        'Urgente': 'urgente',
+        'urgente': 'urgente'
+      };
+      const prioridadDb = prioridadMap[prioridad] || 'media';
+      
+      // Normalizar fechaEntrega a ISO si viene como dd/mm/aaaa
+      let fechaEntregaISO = fechaEntrega;
+      const matchFecha = /^\d{2}\/\d{2}\/\d{4}$/.test(fechaEntrega || '');
+      if (matchFecha && fechaEntrega) {
+        const [dd, mm, yyyy] = fechaEntrega.split('/') as any;
+        fechaEntregaISO = new Date(Number(yyyy), Number(mm) - 1, Number(dd)).toISOString();
+      }
+      const ordenData: OrdenTrabajo & { fotos?: { name: string; dataUrl: string }[] } = {
+        numero: generarNumeroOrden(),
+        clienteId: clienteFinal.id!,
+        vehiculoId: vehiculoFinal.id!,
+        fechaIngreso: new Date().toISOString(),
+        fechaEntrega: fechaEntregaISO || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 días por defecto
+        estado: 'En Progreso', // Las órdenes nuevas se crean automáticamente como "En Progreso"
+        descripcion: descripcionTrabajo,
+        observaciones: observaciones,
+        total: precioFinalNumero,
+        kilometrajeEntrada: kilometrajeEntrada === '' ? 0 : Number(kilometrajeEntrada),
+        kilometrajeSalida: undefined,
+        prioridad: prioridadDb,
+        tecnicoAsignado: tecnicoAsignado
+      };
+
+      // Convertir repuestosSeleccionados a detallesOrden si no hay detalles importados desde cotización
+      // IMPORTANTE: Siempre verificar ambos arrays para asegurar que no se pierdan detalles
+      let detallesParaGuardar = detallesOrden;
+      
+      // Si hay repuestos seleccionados pero no están en detallesOrden, agregarlos
+      if (repuestosSeleccionados.length > 0) {
+        const detallesDeRepuestos = repuestosSeleccionados.map(r => ({
+          tipo: 'repuesto' as const,
+          repuestoId: r.id,
+          cantidad: r.cantidad,
+          precio: r.precio,
+          subtotal: r.subtotal,
+          descripcion: r.nombre
+        }));
+        
+        // Si no hay detallesOrden, usar los de repuestos
+        if (detallesOrden.length === 0) {
+          detallesParaGuardar = detallesDeRepuestos;
+        } else {
+          // Si hay detallesOrden, combinar ambos (evitando duplicados)
+          const detallesCombinados = [...detallesOrden];
+          detallesDeRepuestos.forEach(detalleRepuesto => {
+            const existe = detallesCombinados.some(d => 
+              d.tipo === 'repuesto' && d.repuestoId === detalleRepuesto.repuestoId
+            );
+            if (!existe) {
+              detallesCombinados.push(detalleRepuesto);
+            }
+          });
+          detallesParaGuardar = detallesCombinados;
+        }
+      }
+      
+      // Log para debugging
+      Logger.log('💾 Guardando orden con detalles:', {
+        detallesOrdenCount: detallesOrden.length,
+        repuestosSeleccionadosCount: repuestosSeleccionados.length,
+        detallesParaGuardarCount: detallesParaGuardar.length,
+        usandoCotizacion,
+        detallesParaGuardar: JSON.stringify(detallesParaGuardar, null, 2)
+      });
+      
+      Logger.debug('💾 OrdenFormMejorado: Guardando orden con', detallesParaGuardar.length, 'detalles');
+      Logger.debug('  usandoCotizacion:', usandoCotizacion);
+      Logger.debug('  detallesOrden.length:', detallesOrden.length);
+      Logger.debug('  repuestosSeleccionados.length:', repuestosSeleccionados.length);
+      
+      if (detallesParaGuardar.length > 0) {
+        detallesParaGuardar.forEach((d, idx) => {
+          Logger.debug(`  Detalle ${idx + 1}: tipo=${d.tipo}, servicioId=${d.servicioId}, repuestoId=${d.repuestoId}, cantidad=${d.cantidad}, descripcion=${d.descripcion}`);
+        });
+      }
+      
+      // Validar que tenemos detalles si usamos cotización
+      if (usandoCotizacion && detallesParaGuardar.length === 0) {
+        Logger.warn('⚠️ Importando desde cotización pero no hay detalles para guardar');
+        Logger.error('❌ OrdenFormMejorado: CRÍTICO - Importando desde cotización pero no hay detalles para guardar!');
+        notify.error('Error', 'No se encontraron detalles en la cotización para importar');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Pasar también los detalles (servicios y repuestos) para que el contenedor los persista
+      await onSave(ordenData as any, detallesParaGuardar as any);
+      
+      // Resetear formulario completamente
+      setStep(1);
+      setTipoCliente('existente');
+      setBusquedaCliente('');
+      setClienteSeleccionado(null);
+      setNuevoCliente({
+        nombre: '',
+        rut: '',
+        telefono: '',
+        email: '',
+        direccion: '',
+        activo: true
+      });
+      setVehiculoSeleccionado(null);
+      setNuevoVehiculo({
+        clienteId: 0,
+        marca: '',
+        modelo: '',
+        año: new Date().getFullYear(),
+        patente: '',
+        color: '',
+        kilometraje: 0,
+        observaciones: '',
+        activo: true
+      });
+      setDescripcionTrabajo('');
+      setRepuestosSeleccionados([]);
+      setPrecioFinal('');
+      setObservaciones('');
+      setPrioridad('normal');
+      setTecnicoAsignado('');
+      setKilometrajeEntrada('');
+      setFechaEntrega('');
+      setCotizacionSeleccionada(null);
+      setCotizacionesCliente([]);
+      // Resetear detallesOrden SOLO después de guardar exitosamente
+      setDetallesOrden([]);
+      setIsLoading(false);
+      onClose();
+    } catch (error) {
+      Logger.error('Error guardando orden:', error);
+      setIsLoading(false);
+      notify.error('Error al guardar la orden de trabajo', error instanceof Error ? error.message : 'Error desconocido');
+      // No cerrar el formulario si hay error, para que el usuario pueda corregir
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" 
+      onClick={onClose}
+      style={{ pointerEvents: 'auto' }}
+    >
+      <div 
+        className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" 
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{ pointerEvents: 'auto' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+              <Wrench className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Nueva Orden de Trabajo</h2>
+              <p className="text-sm text-gray-500">Paso {step} de 4</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+            title="Cerrar formulario"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Progress Bar */}
+        <div className="px-6 py-3 bg-gray-50">
+          <div className="flex items-center justify-between">
+            {[1, 2, 3, 4].map((stepNumber) => (
+              <div key={stepNumber} className="flex items-center">
+                <div
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                    step >= stepNumber
+                      ? 'bg-red-600 text-white'
+                      : 'bg-gray-200 text-gray-500'
+                  }`}
+                >
+                  {stepNumber}
+                </div>
+                {stepNumber < 4 && (
+                  <div
+                    className={`w-16 h-1 mx-2 ${
+                      step > stepNumber ? 'bg-red-600' : 'bg-gray-200'
+                    }`}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          {/* Paso 1: Selección de Cliente */}
+          {step === 1 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Seleccionar Cliente</h3>
+                
+                {/* Tipo de Cliente */}
+                <div className="flex gap-4 mb-6">
+                  <button
+                    onClick={() => setTipoCliente('existente')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      tipoCliente === 'existente'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    🔍 Buscar Cliente Existente
+                  </button>
+                  <button
+                    onClick={() => setTipoCliente('nuevo')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      tipoCliente === 'nuevo'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    ✨ Nuevo Cliente
+                  </button>
+                </div>
+
+                {tipoCliente === 'existente' ? (
+                  <div className="space-y-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-sm text-blue-800">
+                        <strong>💡 Buscar Cliente:</strong> Selecciona un cliente existente de la lista. 
+                        Si no encuentras el cliente, cambia a "Nuevo Cliente" para ingresar sus datos.
+                      </p>
+                    </div>
+                    {/* Búsqueda de Cliente */}
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        ref={inputBusquedaClienteRef}
+                        value={busquedaCliente}
+                        onChange={(e) => {
+                          // Actualización síncrona e inmediata - useDeferredValue maneja la optimización
+                          setBusquedaCliente(e.target.value);
+                        }}
+                        autoFocus
+                        placeholder="Buscar por nombre, RUT o teléfono..."
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 pointer-events-auto"
+                      />
+                    </div>
+
+                    {/* Lista de Clientes */}
+                    <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md">
+                      {clientesFiltrados.map((cliente) => (
+                        <div
+                          key={cliente.id}
+                          onClick={() => setClienteSeleccionado(cliente)}
+                          className={`p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 ${
+                            clienteSeleccionado?.id === cliente.id ? 'bg-red-50 border-red-200' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <User className="h-5 w-5 text-gray-400" />
+                            <div>
+                              <p className="font-medium text-gray-900">{cliente.nombre}</p>
+                              <p className="text-sm text-gray-500">
+                                RUT: {cliente.rut} | Tel: {cliente.telefono}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Mostrar cotizaciones del cliente si existen */}
+                    {cotizacionesCliente.length > 0 && (
+                      <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center gap-2 mb-3">
+                          <FileText className="h-4 w-4 text-blue-600" />
+                          <h4 className="font-medium text-blue-900">
+                            Cotizaciones Previas del Cliente ({cotizacionesCliente.length})
+                          </h4>
+                        </div>
+                        <select
+                          value={cotizacionSeleccionada?.id || ''}
+                          onChange={async (e) => {
+                            const cotiSel = cotizacionesCliente.find(c => c.id === Number(e.target.value)) || null;
+                            setCotizacionSeleccionada(cotiSel);
+                            if (cotiSel) {
+                              await importarDesdeCotizacion(cotiSel);
+                            }
+                          }}
+                          className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                          aria-label="Seleccionar cotización previa del cliente"
+                          title="Seleccionar cotización previa del cliente"
+                        >
+                          <option value="">Seleccionar cotización...</option>
+                          {cotizacionesCliente.map((cotizacion) => (
+                            <option key={cotizacion.id} value={cotizacion.id}>
+                              {cotizacion.numero} - ${cotizacion.total?.toLocaleString('es-CL') || 0}
+                            </option>
+                          ))}
+                        </select>
+                        {cotizacionSeleccionada && (
+                          <button
+                            type="button"
+                            onClick={importarDesdeCotizacion}
+                            className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                          >
+                            📥 Importar Datos de Cotización
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <p className="text-sm text-green-800">
+                        <strong>✨ Nuevo Cliente:</strong> Ingresa los datos del cliente en este formulario. 
+                        El sistema verificará si el cliente ya existe (por RUT o email). Si no existe, 
+                        se guardará en la base de datos para futuras gestiones. Podrás crear la orden de trabajo 
+                        sin necesidad de salir del formulario.
+                      </p>
+                    </div>
+                    {/* Formulario Nuevo Cliente */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Nombre Completo
+                        </label>
+                        <input
+                          ref={inputNombreClienteRef}
+                          type="text"
+                          value={nuevoCliente.nombre}
+                          onChange={(e) => setNuevoCliente(prev => ({ ...prev, nombre: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 pointer-events-auto"
+                          placeholder="Nombre del cliente"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          RUT
+                        </label>
+                        <input
+                          type="text"
+                          value={nuevoCliente.rut}
+                          onChange={(e) => {
+                            const formatted = formatearRUT(e.target.value);
+                            setNuevoCliente(prev => ({ ...prev, rut: formatted }));
+                          }}
+                          className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 ${
+                            nuevoCliente.rut && !validarRUT(nuevoCliente.rut) 
+                              ? 'border-red-500' 
+                              : 'border-gray-300'
+                          }`}
+                          placeholder="12.345.678-9"
+                        />
+                        {nuevoCliente.rut && (() => {
+                          const validacion = Validation.rut(nuevoCliente.rut);
+                          return !validacion.valido ? (
+                            <p className="text-red-500 text-xs mt-1">
+                              {validacion.mensaje || 'El RUT ingresado no es válido'}
+                            </p>
+                          ) : null;
+                        })()}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Teléfono
+                        </label>
+                        <input
+                          type="tel"
+                          value={nuevoCliente.telefono}
+                          onChange={(e) => setNuevoCliente(prev => ({ ...prev, telefono: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                          placeholder="+56 9 1234 5678"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          value={nuevoCliente.email}
+                          onChange={(e) => setNuevoCliente(prev => ({ ...prev, email: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                          placeholder="cliente@email.com"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Dirección
+                        </label>
+                        <input
+                          type="text"
+                          value={nuevoCliente.direccion}
+                          onChange={(e) => setNuevoCliente(prev => ({ ...prev, direccion: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                          placeholder="Dirección del cliente"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Paso 2: Datos del Vehículo */}
+          {step === 2 && !usandoCotizacion && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Datos del Vehículo</h3>
+                {/* Selector de modo si el cliente tiene vehículos */}
+                {tipoCliente === 'existente' && clienteSeleccionado && (
+                  <div className="mb-4 flex gap-2">
+                    <button 
+                      onClick={() => setModoVehiculo('existente')} 
+                      className={`px-3 py-1 rounded ${modoVehiculo === 'existente' ? 'bg-red-600 text-white' : 'bg-gray-100'}`}
+                    >
+                      Usar vehículo existente
+                    </button>
+                    <button 
+                      onClick={() => setModoVehiculo('nuevo')} 
+                      className={`px-3 py-1 rounded ${modoVehiculo === 'nuevo' ? 'bg-red-600 text-white' : 'bg-gray-100'}`}
+                    >
+                      Vehículo nuevo
+                    </button>
+                  </div>
+                )}
+
+                {modoVehiculo === 'existente' && vehiculosDelCliente.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">Selecciona uno de los vehículos del cliente:</p>
+                    <div className="max-h-56 overflow-y-auto border rounded">
+                      {vehiculosDelCliente.map(v => (
+                        <div 
+                          key={v.id} 
+                          onClick={() => setVehiculoSeleccionado(v)} 
+                          className={`p-3 border-b cursor-pointer ${vehiculoSeleccionado?.id === v.id ? 'bg-red-50 border-red-200' : ''}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Car className="h-4 w-4 text-gray-500"/>
+                            <div>
+                              <p className="font-medium text-gray-900">{v.marca} {v.modelo} ({v.año})</p>
+                              <p className="text-sm text-gray-600">Patente: {v.patente}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {vehiculosDelCliente.length === 0 && (
+                      <p className="text-sm text-gray-500">Este cliente no tiene vehículos. Cambia a "Vehículo nuevo".</p>
+                    )}
+                  </div>
+                ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Patente *
+                    </label>
+                    <input
+                      type="text"
+                      ref={inputPatenteRef}
+                      value={nuevoVehiculo.patente}
+                      onChange={(e) => setNuevoVehiculo(prev => ({ ...prev, patente: e.target.value.toUpperCase() }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 pointer-events-auto"
+                      placeholder="ABC123"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Marca *
+                    </label>
+                    <input
+                      type="text"
+                      value={nuevoVehiculo.marca}
+                      onChange={(e) => setNuevoVehiculo(prev => ({ ...prev, marca: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                      placeholder="Toyota"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Modelo *
+                    </label>
+                    <input
+                      type="text"
+                      value={nuevoVehiculo.modelo}
+                      onChange={(e) => setNuevoVehiculo(prev => ({ ...prev, modelo: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                      placeholder="Corolla"
+                    />
+                  </div>
+                </div>
+                )}
+
+                {/* Kilometraje de Entrada */}
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kilometraje de Entrada
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={kilometrajeEntrada === '' ? '' : kilometrajeEntrada}
+                    onChange={(e) => {
+                      const valor = e.target.value;
+                      startTransition(() => {
+                        if (valor === '') {
+                          setKilometrajeEntrada('');
+                        } else {
+                          const num = parseInt(valor.replace(/[^0-9]/g, ''), 10);
+                          if (!isNaN(num)) {
+                            setKilometrajeEntrada(num);
+                          }
+                        }
+                      });
+                    }}
+                    onFocus={(e) => {
+                      if (kilometrajeEntrada === '' || kilometrajeEntrada === 0) {
+                        e.target.select();
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="50000"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Paso 3: Trabajo y Repuestos */}
+          {step === 3 && !usandoCotizacion && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Descripción del Trabajo</h3>
+                <textarea
+                  ref={textareaDescripcionRef}
+                  value={descripcionTrabajo}
+                  onChange={(e) => setDescripcionTrabajo(e.target.value)}
+                  onFocus={(e) => {
+                    // Asegurar que el textarea sea interactivo
+                    e.target.style.pointerEvents = 'auto';
+                  }}
+                  rows={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                  style={{ pointerEvents: 'auto' }}
+                  placeholder="Describe el trabajo a realizar..."
+                />
+              </div>
+
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Repuestos a Utilizar</h3>
+                
+                {/* Búsqueda de Repuestos */}
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={busquedaRepuesto}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      startTransition(() => {
+                        setBusquedaRepuesto(value);
+                      });
+                    }}
+                    placeholder="Buscar repuestos..."
+                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+
+                {/* Lista de Repuestos Disponibles */}
+                {repuestosFiltrados.length > 0 && (
+                  <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md mb-4">
+                    {!busquedaRepuesto && (
+                      <div className="p-2 bg-gray-50 border-b border-gray-200">
+                        <p className="text-xs text-gray-600 font-medium">
+                          Mostrando {repuestosFiltrados.length} de {repuestos.length} repuestos disponibles
+                        </p>
+                      </div>
+                    )}
+                    {repuestosFiltrados.map((repuesto) => (
+                      <div
+                        key={repuesto.id}
+                        onClick={() => agregarRepuesto(repuesto)}
+                        className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 flex items-center justify-between transition-colors"
+                      >
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-900">{repuesto.nombre}</p>
+                          <p className="text-sm text-gray-500">
+                            {repuesto.codigo && `Código: ${repuesto.codigo} | `}Stock: {repuesto.stock || 0} | {repuesto.categoria || 'Sin categoría'}
+                          </p>
+                        </div>
+                        <div className="text-right ml-4">
+                          <p className="font-medium text-gray-900">${repuesto.precio?.toLocaleString('es-CL') || 0}</p>
+                          <Plus className="h-4 w-4 text-green-600 mx-auto mt-1" />
+                        </div>
+                      </div>
+                    ))}
+                    {repuestosFiltrados.length === 0 && busquedaRepuesto && (
+                      <div className="p-3 text-sm text-gray-500 text-center">
+                        No se encontraron repuestos que coincidan con "{busquedaRepuesto}"
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Repuestos Seleccionados */}
+                <div className="space-y-2">
+                  {repuestosSeleccionados.map((repuesto) => (
+                    <div key={repuesto.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-900">{repuesto.nombre}</p>
+                        <p className="text-sm text-gray-500">${repuesto.precio.toLocaleString('es-CL')} c/u</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => actualizarCantidadRepuesto(repuesto.id, repuesto.cantidad - 1)}
+                            className="w-8 h-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center hover:bg-red-200"
+                          >
+                            -
+                          </button>
+                          <span className="w-8 text-center font-medium">{repuesto.cantidad}</span>
+                          <button
+                            onClick={() => actualizarCantidadRepuesto(repuesto.id, repuesto.cantidad + 1)}
+                            className="w-8 h-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center hover:bg-green-200"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <div className="text-right min-w-[100px]">
+                          <p className="font-medium text-gray-900">${repuesto.subtotal.toLocaleString('es-CL')}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Resumen de Repuestos */}
+                {repuestosSeleccionados.length > 0 && (
+                  <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium text-gray-900">Subtotal Repuestos:</span>
+                      <span className="font-bold text-blue-600">${subtotalRepuestos.toLocaleString('es-CL')}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Paso 4: Resumen y Configuración Final */}
+          {step === 4 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Resumen de la Orden de Trabajo</h3>
+                
+                {/* Información del Cliente */}
+                <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Cliente</h4>
+                  <p className="text-gray-700">
+                    {tipoCliente === 'existente' && clienteSeleccionado
+                      ? `${clienteSeleccionado.nombre} (${clienteSeleccionado.rut})`
+                      : `${nuevoCliente.nombre} (${nuevoCliente.rut})`
+                    }
+                  </p>
+                </div>
+
+                {/* Información del Vehículo */}
+                <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Vehículo</h4>
+                  <p className="text-gray-700">
+                    {vehiculoSeleccionado 
+                      ? `${vehiculoSeleccionado.marca} ${vehiculoSeleccionado.modelo} - ${vehiculoSeleccionado.patente}`
+                      : `${nuevoVehiculo.marca} ${nuevoVehiculo.modelo} - ${nuevoVehiculo.patente}`
+                    }
+                  </p>
+                  {((typeof kilometrajeEntrada === 'number' && kilometrajeEntrada > 0) || (typeof kilometrajeEntrada === 'string' && kilometrajeEntrada !== '' && Number(kilometrajeEntrada) > 0)) && (
+                    <p className="text-gray-700">Kilometraje: {Number(kilometrajeEntrada).toLocaleString('es-CL')} km</p>
+                  )}
+                </div>
+
+                {/* Descripción del Trabajo */}
+                <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Trabajo a Realizar</h4>
+                  <p className="text-gray-700">{descripcionTrabajo}</p>
+                </div>
+
+                {/* Repuestos */}
+                {repuestosSeleccionados.length > 0 && (
+                  <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                    <h4 className="font-medium text-gray-900 mb-2">Repuestos</h4>
+                    <div className="space-y-2">
+                      {repuestosSeleccionados.map((repuesto) => (
+                        <div key={repuesto.id} className="flex justify-between">
+                          <span className="text-gray-700">
+                            {repuesto.nombre} x{repuesto.cantidad}
+                          </span>
+                          <span className="font-medium text-gray-900">
+                            ${repuesto.subtotal.toLocaleString('es-CL')}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="border-t pt-2 flex justify-between font-medium">
+                        <span>Subtotal Repuestos:</span>
+                        <span>${subtotalRepuestos.toLocaleString('es-CL')}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Configuración de la Orden */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Prioridad
+                    </label>
+                    <select
+                      value={prioridad}
+                      onChange={(e) => {
+                        startTransition(() => {
+                          setPrioridad(e.target.value as 'baja' | 'normal' | 'alta' | 'urgente');
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                      title="Seleccionar prioridad de la orden"
+                    >
+                      <option value="baja">Baja</option>
+                      <option value="normal">Normal</option>
+                      <option value="alta">Alta</option>
+                      <option value="urgente">Urgente</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Técnico Asignado
+                    </label>
+                    <input
+                      type="text"
+                      value={tecnicoAsignado}
+                      onChange={(e) => {
+                        startTransition(() => {
+                          setTecnicoAsignado(e.target.value);
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                      placeholder="Nombre del técnico"
+                    />
+                  </div>
+                </div>
+
+                {/* Fecha de Entrega */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Fecha Estimada de Entrega
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaEntrega}
+                    onChange={(e) => {
+                      startTransition(() => {
+                        setFechaEntrega(e.target.value);
+                      });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                    title="Fecha estimada de entrega"
+                  />
+                </div>
+
+                {/* Precio Final */}
+                <div className="bg-red-50 p-4 rounded-lg mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Precio Final del Trabajo *
+                  </label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={precioFinal}
+                      onChange={(e) => {
+                        // Permitir solo números
+                        const valor = e.target.value.replace(/[^0-9]/g, '');
+                        setPrecioFinal(valor);
+                      }}
+                      onFocus={(e) => {
+                        // Seleccionar todo el texto cuando se hace foco para poder escribir directamente
+                        e.target.select();
+                      }}
+                      disabled={totalBloqueado}
+                      className={`w-full pl-10 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 ${totalBloqueado ? 'bg-gray-100 border-gray-200 text-gray-600' : 'border-gray-300'}`}
+                      placeholder="0"
+                    />
+                  </div>
+                  {totalBloqueado && (
+                    <p className="text-xs text-gray-600 mt-1">Total fijado desde la cotización.</p>
+                  )}
+                  <p className="text-sm text-gray-500 mt-1">
+                    Incluye mano de obra y todos los repuestos
+                  </p>
+                </div>
+
+                {/* Observaciones y Fotografías */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Observaciones</label>
+                  <textarea
+                    value={observaciones}
+                    onChange={(e) => {
+                      startTransition(() => {
+                        setObservaciones(e.target.value);
+                      });
+                    }}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="Observaciones adicionales..."
+                  />
+
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Fotografías (JPG/PNG/WebP)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => handleFiles(e.target.files)}
+                      className="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100"
+                    />
+                    {fotos.length > 0 && (
+                      <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {fotos.map((f, idx) => (
+                          <div key={idx} className="relative border rounded-md overflow-hidden">
+                            <img src={f.dataUrl} alt={f.name} className="w-full h-28 object-cover" />
+                            <button type="button" onClick={() => removeFoto(idx)} className="absolute top-1 right-1 bg-white/80 hover:bg-white text-red-600 text-xs px-2 py-0.5 rounded">Quitar</button>
+                </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-between items-center p-6 border-t border-gray-200">
+          <button
+            onClick={() => step > 1 ? setStep(step - 1) : onClose()}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+          >
+            {step > 1 ? 'Anterior' : 'Cancelar'}
+          </button>
+          
+          <div className="flex gap-3">
+            {step < 4 ? (
+              <button
+                onClick={() => setStep(usandoCotizacion ? (step === 1 ? 4 : Math.min(4, step + 1)) : step + 1)}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+              >
+                Siguiente
+              </button>
+            ) : (
+              <button
+                onClick={handleSave}
+                disabled={isLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    Guardando...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    Crear Orden de Trabajo
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

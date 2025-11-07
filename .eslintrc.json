@@ -1,0 +1,16 @@
+{
+  "extends": ["eslint:recommended"],
+  "rules": {
+    "react/no-unknown-property": "off",
+    "no-unused-vars": "off",
+    "no-undef": "off"
+  },
+  "ignorePatterns": [
+    "TestComponent.tsx",
+    "**/TestComponent.tsx",
+    "**/*TestComponent*",
+    "node_modules/",
+    "dist/",
+    "build/"
+  ]
+}

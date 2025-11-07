@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+release/
+build/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database
+data/
+*.db
+*.db-shm
+*.db-wal
+backups/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Electron
+out/
+app/
+
+# TypeScript
+*.tsbuildinfo
+
+# Test data
+test-data/
+__tests__/coverage/

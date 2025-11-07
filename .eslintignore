@@ -1,0 +1,15 @@
+# Ignorar archivos problemáticos
+TestComponent.tsx
+**/TestComponent.tsx
+**/*TestComponent*
+
+# Ignorar node_modules
+node_modules/
+
+# Ignorar archivos de build
+dist/
+build/
+
+# Ignorar archivos de cache
+.cache/
+.vite/

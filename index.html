@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Resortes Puerto Montt - Sistema de Gestión</title>
+    <style>
+      /* Pantalla de carga inicial - se muestra inmediatamente */
+      #initial-loading {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      
+      .loading-content {
+        text-align: center;
+        max-width: 400px;
+        width: 100%;
+        padding: 2rem;
+      }
+      
+      .loading-logo {
+        width: 96px;
+        height: 96px;
+        margin: 0 auto 1.5rem;
+        background: linear-gradient(to bottom right, #dc2626, #b91c1c);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 10px 25px rgba(220, 38, 38, 0.3);
+      }
+      
+      .loading-logo svg {
+        width: 56px;
+        height: 56px;
+        color: white;
+        animation: rotateClockwise 2s linear infinite;
+      }
+      
+      .loading-title {
+        font-size: 2.25rem;
+        font-weight: 700;
+        color: #991b1b;
+        margin-bottom: 0.75rem;
+        letter-spacing: -0.025em;
+      }
+      
+      .loading-subtitle {
+        font-size: 1.125rem;
+        font-weight: 500;
+        color: #dc2626;
+        margin-bottom: 2rem;
+      }
+      
+      .spinner {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 1.5rem;
+        border: 4px solid #fca5a5;
+        border-top-color: #dc2626;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      .progress-bar-container {
+        width: 100%;
+        height: 8px;
+        background-color: #fee2e2;
+        border-radius: 9999px;
+        overflow: hidden;
+        margin-bottom: 1rem;
+      }
+      
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(to right, #dc2626, #ef4444, #dc2626);
+        border-radius: 9999px;
+        animation: progress 2s ease-in-out infinite;
+        width: 60%;
+      }
+      
+      .loading-text {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: #dc2626;
+        margin-top: 1rem;
+        animation: pulse 2s ease-in-out infinite;
+      }
+      
+      .loading-hint {
+        font-size: 0.75rem;
+        color: #ef4444;
+        margin-top: 0.5rem;
+        opacity: 0.75;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      @keyframes rotateClockwise {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+      }
+      
+      @keyframes progress {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(400%);
+        }
+      }
+      
+      /* Ocultar cuando React cargue */
+      body.loaded #initial-loading {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Pantalla de carga inicial - se muestra inmediatamente -->
+    <div id="initial-loading">
+      <div class="loading-content">
+        <div class="loading-logo">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </div>
+        <h1 class="loading-title">Resortes Puerto Montt</h1>
+        <p class="loading-subtitle">Cargando datos del sistema...</p>
+        
+        <div class="spinner"></div>
+        
+        <div class="progress-bar-container">
+          <div class="progress-bar"></div>
+        </div>
+        
+        <p class="loading-text">Inicializando aplicación</p>
+        <p class="loading-hint">Por favor espera mientras se cargan los datos esenciales</p>
+      </div>
+    </div>
+    
+    <div id="root"></div>
+    <script>
+      console.log('🔧 index.html: HTML cargado, elemento root encontrado:', !!document.getElementById('root'));
+      
+      // Ocultar pantalla de carga inicial cuando React esté listo
+      // Pero esperar un tiempo mínimo para que sea visible
+      window.addEventListener('DOMContentLoaded', () => {
+        const loadStartTime = performance.now();
+        const minDisplayTime = 1500; // Mínimo 1.5 segundos para mostrar la pantalla
+        
+        // La pantalla de carga se ocultará cuando React cargue y muestre su propia pantalla
+        // pero esperaremos al menos el tiempo mínimo
+        setTimeout(() => {
+          const elapsedTime = performance.now() - loadStartTime;
+          const remainingTime = Math.max(0, minDisplayTime - elapsedTime);
+          
+          console.log('⏱️ HTML: Tiempo transcurrido:', elapsedTime, 'ms, esperando', remainingTime, 'ms más');
+          
+          setTimeout(() => {
+            const loading = document.getElementById('initial-loading');
+            if (loading) {
+              loading.style.opacity = '0';
+              loading.style.transition = 'opacity 0.5s ease-out';
+              setTimeout(() => {
+                if (loading) {
+                  loading.style.display = 'none';
+                  document.body.classList.add('loaded');
+                }
+              }, 500);
+            }
+          }, remainingTime);
+        }, 1000);
+      });
+    </script>
+    <script type="module" src="/src/renderer/main.tsx"></script>
+  </body>
+</html>
