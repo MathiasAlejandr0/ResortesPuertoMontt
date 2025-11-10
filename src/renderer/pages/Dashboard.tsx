@@ -13,6 +13,30 @@ export default function Dashboard() {
   const { clientes, vehiculos, cotizaciones, ordenes, repuestos } = useApp();
   const [ordenSeleccionada, setOrdenSeleccionada] = useState<OrdenTrabajo | null>(null);
   const [isVerModalOpen, setIsVerModalOpen] = useState(false);
+  
+  // Estado para fecha actual en tiempo real
+  const [fechaActual, setFechaActual] = useState(() => {
+    const ahora = new Date();
+    return ahora.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  });
+
+  // Actualizar fecha cada minuto para mantenerla en tiempo real
+  useEffect(() => {
+    const actualizarFecha = () => {
+      const ahora = new Date();
+      const fechaFormateada = ahora.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+      setFechaActual(fechaFormateada);
+    };
+
+    // Actualizar inmediatamente
+    actualizarFecha();
+
+    // Actualizar cada minuto
+    const intervalo = setInterval(actualizarFecha, 60000);
+
+    return () => clearInterval(intervalo);
+  }, []);
+
   console.log('🔧 Dashboard.tsx: Renderizando dashboard', {
     totalOrdenes: ordenes.length,
     ordenesConTotal: ordenes.filter(o => o.total).length,
@@ -204,6 +228,22 @@ export default function Dashboard() {
     return result;
   }, [repuestos]);
 
+  // Calcular rango de meses para el título (últimos 6 meses)
+  const rangoMeses = useMemo(() => {
+    const ahora = new Date();
+    const mesInicio = new Date(ahora);
+    mesInicio.setMonth(ahora.getMonth() - 5);
+    
+    const mesInicioFormateado = mesInicio.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+    const mesFinFormateado = ahora.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+    
+    // Capitalizar primera letra
+    return {
+      inicio: mesInicioFormateado.charAt(0).toUpperCase() + mesInicioFormateado.slice(1),
+      fin: mesFinFormateado.charAt(0).toUpperCase() + mesFinFormateado.slice(1)
+    };
+  }, [fechaActual]); // Depende de fechaActual para actualizarse cuando cambie el mes
+
   // Generar datos de ventas (memoizado)
   const salesData = useMemo(() => {
     const meses = ['May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct'];
@@ -239,18 +279,23 @@ export default function Dashboard() {
     { week: "Total", orders: ordenes.length }
   ], [ordenesCompletadas, ordenesEnProgreso, ordenesPendientes, ordenes.length]);
 
-  // Items de inventario bajo (memoizado)
+  // Items de inventario bajo (memoizado) - Muestra TODOS los items bajo de stock
   const lowStockItems = useMemo(() => {
     return repuestos
       .filter(r => (r.stock || 0) < (r.stockMinimo || 0))
-      .slice(0, 5)
       .map(r => ({
         id: r.id,
         name: r.nombre,
         stock: r.stock || 0,
         minStock: r.stockMinimo || 0,
         status: (r.stock || 0) < (r.stockMinimo || 0) / 2 ? "critical" : "warning",
-      }));
+      }))
+      .sort((a, b) => {
+        // Ordenar por prioridad: primero los críticos, luego por stock (menor primero)
+        if (a.status === "critical" && b.status !== "critical") return -1;
+        if (a.status !== "critical" && b.status === "critical") return 1;
+        return a.stock - b.stock;
+      });
   }, [repuestos]);
 
   // Función para obtener el orden de prioridad del estado (constante, no necesita memo)
@@ -308,7 +353,7 @@ export default function Dashboard() {
     <div className="flex flex-col gap-8 p-6 lg:p-8">
       <div className="flex flex-col gap-3 pb-2 border-b border-border">
         <h1 className="text-4xl font-bold tracking-tight text-card-foreground">Dashboard</h1>
-        <p className="text-base text-muted-foreground">Resumen general de tu taller mecánico - Octubre 2025</p>
+        <p className="text-base text-muted-foreground">Resumen general de tu taller mecánico - {fechaActual.charAt(0).toUpperCase() + fechaActual.slice(1)}</p>
       </div>
 
       {/* KPI Cards */}
@@ -346,7 +391,7 @@ export default function Dashboard() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="shadow-sm border border-border">
           <CardHeader className="pb-4">
-            <CardTitle className="text-xl font-bold text-card-foreground">Ventas Mensuales (Mayo - Octubre 2025)</CardTitle>
+            <CardTitle className="text-xl font-bold text-card-foreground">Ventas Mensuales ({rangoMeses.inicio} - {rangoMeses.fin})</CardTitle>
           </CardHeader>
           <CardContent className="pb-2">
             <div className="space-y-4">

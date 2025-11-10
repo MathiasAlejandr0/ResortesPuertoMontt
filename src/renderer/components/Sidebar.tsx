@@ -7,6 +7,7 @@ import {
   Settings,
   CreditCard,
 } from "lucide-react";
+import iconLogo from '../../../assets/icon.png';
 
 interface SidebarProps {
   currentPage: string;
@@ -28,13 +29,19 @@ export default function SidebarComponent({ currentPage, onPageChange }: SidebarP
 
   return (
     <div className="flex h-full flex-col gap-6 bg-sidebar px-4 py-6">
-      <div className="flex items-center gap-3 px-2 pb-2 border-b border-sidebar-border">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/20">
-          <Wrench className="h-7 w-7 text-primary-foreground" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-sidebar-foreground">Resortes Puerto Montt</h1>
-          <p className="text-xs text-muted-foreground">Gestión de Taller</p>
+      <div className="flex items-center justify-center px-3 pb-5 border-b border-sidebar-border">
+        <div className="flex h-24 w-full max-w-[200px] items-center justify-center rounded-2xl bg-white shadow-xl shadow-primary/25 overflow-hidden px-4 py-3">
+          <img 
+            src={iconLogo} 
+            alt="Resortes Puerto Montt" 
+            className="h-auto w-full max-h-full object-contain"
+            style={{ 
+              imageRendering: 'auto',
+              WebkitImageRendering: 'optimizeQuality',
+              objectFit: 'contain'
+            }}
+            loading="eager"
+          />
         </div>
       </div>
 

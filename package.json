@@ -110,6 +110,7 @@
   "build": {
     "appId": "com.resortespuertomontt.app",
     "productName": "Resortes Puerto Montt",
+    "icon": "assets/icon.png",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -121,6 +122,7 @@
     ],
     "win": {
       "target": "nsis",
+      "icon": "assets/icon.png",
       "publisherName": "Resortes Puerto Montt"
     },
     "nsis": {

@@ -1023,7 +1023,32 @@ export default function OrdenesPage() {
                           </select>
                         </td>
                         <td className="py-4 px-4">
-                          {getEstadoBadge(orden.estado)}
+                          <select
+                            value={orden.estado || 'Pendiente'}
+                            onChange={async (e) => {
+                              const nuevoEstado = e.target.value;
+                              try {
+                                const ordenActualizada = { ...orden, estado: nuevoEstado };
+                                const resp = await window.electronAPI.saveOrdenTrabajo(ordenActualizada);
+                                if (resp?.success !== false) {
+                                  await refreshOrdenes();
+                                  notify.success('Estado actualizado');
+                                } else {
+                                  notify.error('Error', 'No se pudo actualizar el estado');
+                                }
+                              } catch (error) {
+                                Logger.error('Error actualizando estado:', error);
+                                notify.error('Error', 'No se pudo actualizar el estado');
+                              }
+                            }}
+                            className="px-2 py-1 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <option value="Pendiente">Pendiente</option>
+                            <option value="En Progreso">En Progreso</option>
+                            <option value="Completada">Completada</option>
+                            <option value="Cancelada">Cancelada</option>
+                          </select>
                         </td>
                         <td className="py-4 px-4">
                           <span className="font-semibold text-card-foreground">
