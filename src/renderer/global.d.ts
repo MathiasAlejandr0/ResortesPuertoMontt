@@ -54,6 +54,7 @@ export interface OrdenTrabajo {
   metodoPago?: 'Efectivo' | 'Débito' | 'Crédito';
   numeroCuotas?: number;
   fechaPago?: string;
+  fechaProgramada?: string;
 }
 
 export interface Repuesto {
@@ -151,6 +152,23 @@ declare global {
       confirmarPagoCuota: (data: { cuotaId: number; montoPagado: number; fechaPago: string; observaciones?: string }) => Promise<{ success: boolean; data?: any; error?: string }>;
       actualizarEstadosCuotasVencidas: () => Promise<{ success: boolean; error?: string }>;
       
+      // Caja Diaria
+      getEstadoCaja: () => Promise<any>;
+      abrirCaja: (montoInicial: number, observaciones?: string) => Promise<any>;
+      cerrarCaja: (montoFinal: number, observaciones?: string) => Promise<any>;
+      registrarMovimientoCaja: (movimiento: any) => Promise<any>;
+      getMovimientosCajaPorFecha: (fecha: string) => Promise<any[]>;
+      getArqueoCaja: (fecha: string) => Promise<any>;
+      
+      // Comisiones de Técnicos
+      calcularYGuardarComision: (ordenId: number, tecnicoId: number | null, tecnicoNombre: string, porcentajeComision: number) => Promise<any>;
+      getReporteComisiones: (mes: string) => Promise<any[]>;
+      getResumenComisionesPorTecnico: (mes: string) => Promise<any[]>;
+      
+      // Agenda
+      updateFechaProgramada: (ordenId: number, fechaProgramada: string) => Promise<{ success: boolean; data?: any; error?: string }>;
+      getOrdenesParaAgenda: (fechaInicio: string, fechaFin: string) => Promise<OrdenTrabajo[]>;
+      
       // Repuestos
       getAllRepuestos: () => Promise<Repuesto[]>;
       saveRepuesto: (repuesto: Repuesto) => Promise<Repuesto>;
@@ -172,8 +190,13 @@ declare global {
       // Importación
       importarRepuestos: (datos: Repuesto[]) => Promise<void>;
       limpiarRepuestos: () => Promise<void>;
+      limpiarServicios: () => Promise<void>;
+      limpiarClientes: () => Promise<void>;
       obtenerEstadisticasRepuestos: () => Promise<any>;
       limpiarDuplicadosClientes: () => Promise<void>;
+      procesarExcelRepuestos: () => Promise<{ success: boolean; cantidad?: number; error?: string; erroresDetallados?: any[] }>;
+      procesarExcelServicios: () => Promise<{ success: boolean; cantidad?: number; errores?: number; error?: string; erroresDetallados?: any[] }>;
+      procesarExcelClientes: () => Promise<{ success: boolean; cantidad?: number; errores?: number; error?: string; erroresDetallados?: any[] }>;
       repairIntegrity: () => Promise<{ success: boolean; result?: any; error?: string }>;
       diagnosticarOrdenesProblemas: () => Promise<{ success: boolean; problemas?: Array<{ ordenId: number; numeroOrden: string; problemas: string[]; cuotasEsperadas?: number; cuotasEncontradas?: number; detallesEncontrados?: number }>; error?: string }>;
       performMaintenance: (force?: boolean) => Promise<{ success: boolean; error?: string }>;

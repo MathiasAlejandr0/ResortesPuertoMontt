@@ -268,5 +268,5 @@
 }
 
 .progress-bar-orders {
-  @apply bg-blue-600 h-2 rounded-full transition-all duration-300;
+  @apply bg-red-600 h-2 rounded-full transition-all duration-300;
 }

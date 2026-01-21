@@ -1,13 +1,47 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, ReactNode } from 'react';
 import './index.css';
-import SidebarComponent from './components/Sidebar';
+import DashboardLayout from './components/DashboardLayout';
 import Dashboard from './pages/Dashboard';
-import ClientesPage from './pages/Clientes';
+import ClientesListadoPage from './pages/ClientesListado';
 import CotizacionesPage from './pages/Cotizaciones';
 import InventarioPage from './pages/Inventario';
 import OrdenesPage from './pages/Ordenes';
+import AgendaPage from './pages/Agenda';
+import RecordatoriosPage from './pages/Recordatorios';
+import VehiculosPage from './pages/Vehiculos';
+import HistoricoPage from './pages/Historico';
+import TiendaPage from './pages/Tienda';
+import CierresCajaPage from './pages/CierresCaja';
+import MovimientosCajaPage from './pages/MovimientosCaja';
+import SaldosCuentasPage from './pages/SaldosCuentas';
+import MovimientosCuentasPage from './pages/MovimientosCuentas';
+import ProductosPage from './pages/Productos';
+import EditorProductosPage from './pages/EditorProductos';
+import EditorServiciosPage from './pages/EditorServicios';
+import ServiciosListadoPage from './pages/ServiciosListado';
+import CategoriasListadoPage from './pages/CategoriasListado';
+import ProveedoresListadoPage from './pages/ProveedoresListado';
+import GraficasGeneralPage from './pages/GraficasGeneral';
+import GraficasProductosPage from './pages/GraficasProductos';
+import GraficasServiciosPage from './pages/GraficasServicios';
+import InformesClientePage from './pages/InformesCliente';
+import InformesVehiculoPage from './pages/InformesVehiculo';
+import InformesVehiculoDetalladoPage from './pages/InformesVehiculoDetallado';
+import InformesCuentaCorrientePage from './pages/InformesCuentaCorriente';
+import ImportarProductosPage from './pages/ImportarProductos';
+import ImportarServiciosPage from './pages/ImportarServicios';
+import ImportarClientesPage from './pages/ImportarClientes';
+import ExportarPage from './pages/Exportar';
+import ConfiguracionComprobantesPage from './pages/ConfiguracionComprobantes';
+import ConfiguracionFormulariosPage from './pages/ConfiguracionFormularios';
+import ConfiguracionSistemaPage from './pages/ConfiguracionSistema';
+import TrabajadoresListadoPage from './pages/TrabajadoresListado';
+import PagosTrabajadoresPage from './pages/PagosTrabajadores';
+import ScoreTrabajadoresPage from './pages/ScoreTrabajadores';
 import PagosPage from './pages/Pagos';
 import ConfiguracionPage from './pages/Configuracion';
+import CajaDiariaPage from './pages/CajaDiaria';
+import ReporteTecnicosPage from './pages/ReporteTecnicos';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorBoundary from './components/ErrorBoundary';
 import ManualUsuario from './components/ManualUsuario';
@@ -84,6 +118,21 @@ function AppContent() {
     error 
   } = useApp();
   
+  // Función helper para renderizar páginas placeholder
+  const renderPlaceholderPage = (title: string, description: string, action?: ReactNode) => {
+    return (
+      <div className="p-6 bg-background text-foreground">
+        <h1 className="text-4xl font-bold mb-6 text-center">{title}</h1>
+        <div className="card-professional">
+          <div className="p-6">
+            <p className="text-muted-foreground text-center mb-4">{description}</p>
+            {action && <div className="flex justify-center">{action}</div>}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Funciones de navegación
   const handlePageChange = (page: string) => {
     try {
@@ -179,35 +228,156 @@ function AppContent() {
         case 'dashboard':
           Logger.log('🔧 AppContent: Renderizando Dashboard');
           return <Dashboard />;
-        case 'clientes':
-          Logger.log('🔧 AppContent: Renderizando ClientesPage');
-          return <ClientesPage />;
-        case 'inventario':
-          Logger.log('🔧 AppContent: Renderizando InventarioPage');
-          return <InventarioPage />;
-        case 'cotizaciones':
-          Logger.log('🔧 AppContent: Renderizando CotizacionesPage');
-          return <CotizacionesPage />;
+        case 'metricas':
+          Logger.log('🔧 AppContent: Renderizando MetricasPage');
+          return renderPlaceholderPage(
+            'Métricas',
+            'Panel de métricas y análisis del taller.'
+          );
         case 'ordenes':
           Logger.log('🔧 AppContent: Renderizando OrdenesPage');
           return <OrdenesPage />;
-        case 'pagos':
-          Logger.log('🔧 AppContent: Renderizando PagosPage');
-          return <PagosPage />;
+        case 'cotizaciones':
+          Logger.log('🔧 AppContent: Renderizando CotizacionesPage');
+          return <CotizacionesPage />;
+        case 'calendario':
+          Logger.log('🔧 AppContent: Renderizando CalendarioPage');
+          return <AgendaPage />;
+        case 'historico':
+          Logger.log('🔧 AppContent: Renderizando HistoricoPage');
+          return <HistoricoPage />;
+        case 'vehiculos-registrados':
+          Logger.log('🔧 AppContent: Renderizando VehiculosPage');
+          return <VehiculosPage />;
+        case 'avisos-programados':
+          Logger.log('🔧 AppContent: Renderizando RecordatoriosPage');
+          return <RecordatoriosPage />;
+        case 'tienda':
+          Logger.log('🔧 AppContent: Renderizando TiendaPage');
+          return <TiendaPage />;
+        case 'compras':
+          Logger.log('🔧 AppContent: Renderizando ComprasPage');
+          return renderPlaceholderPage(
+            'Compras',
+            'Gestión de compras y proveedores.'
+          );
+        case 'ventas':
+          Logger.log('🔧 AppContent: Renderizando VentasPage');
+          return renderPlaceholderPage(
+            'Ventas',
+            'Gestión de ventas del taller.'
+          );
+        case 'saldos':
+          Logger.log('🔧 AppContent: Renderizando SaldosCuentasPage');
+          return <SaldosCuentasPage />;
+        case 'movimientos-cuentas':
+          Logger.log('🔧 AppContent: Renderizando MovimientosCuentasPage');
+          return <MovimientosCuentasPage />;
+        case 'trabajadores':
+          Logger.log('🔧 AppContent: Renderizando TrabajadoresPage');
+          return <TrabajadoresListadoPage />;
+        case 'comisiones':
+          Logger.log('🔧 AppContent: Renderizando ComisionesPage');
+          return renderPlaceholderPage(
+            'Comisiones',
+            'Gestión de comisiones de trabajadores.'
+          );
+        case 'pagos-trabajadores':
+          Logger.log('🔧 AppContent: Renderizando PagosTrabajadoresPage');
+          return <PagosTrabajadoresPage />;
+        case 'score-trabajadores':
+          Logger.log('🔧 AppContent: Renderizando ScoreTrabajadoresPage');
+          return <ScoreTrabajadoresPage />;
+        case 'graficas':
+          Logger.log('🔧 AppContent: Renderizando GraficasPage');
+          return <GraficasGeneralPage />;
+        case 'graficas-productos':
+          Logger.log('🔧 AppContent: Renderizando GraficasProductosPage');
+          return <GraficasProductosPage />;
+        case 'graficas-servicios':
+          Logger.log('🔧 AppContent: Renderizando GraficasServiciosPage');
+          return <GraficasServiciosPage />;
+        case 'tutoriales':
+          Logger.log('🔧 AppContent: Renderizando TutorialesPage');
+          return renderPlaceholderPage(
+            'Tutoriales',
+            'Tutoriales y guías del sistema.'
+          );
+        case 'estado-caja':
+          Logger.log('🔧 AppContent: Renderizando EstadoCajaPage');
+          return <CajaDiariaPage />;
+        case 'cierres':
+          Logger.log('🔧 AppContent: Renderizando CierresCajaPage');
+          return <CierresCajaPage />;
+        case 'movimientos':
+          Logger.log('🔧 AppContent: Renderizando MovimientosCajaPage');
+          return <MovimientosCajaPage />;
+        case 'cuentas-corrientes':
+          Logger.log('🔧 AppContent: Renderizando CuentasCorrientesPage');
+          return renderPlaceholderPage(
+            'Cuentas corrientes',
+            'Cuentas corrientes y saldos.'
+          );
+        case 'inventario':
+          Logger.log('🔧 AppContent: Renderizando ProductosPage');
+          return <ProductosPage />;
+        case 'editor-productos':
+          Logger.log('🔧 AppContent: Renderizando EditorProductosPage');
+          return <EditorProductosPage />;
+        case 'servicios':
+          Logger.log('🔧 AppContent: Renderizando ServiciosPage');
+          return <ServiciosListadoPage />;
+        case 'editor-servicios':
+          Logger.log('🔧 AppContent: Renderizando EditorServiciosPage');
+          return <EditorServiciosPage />;
+        case 'categorias':
+          Logger.log('🔧 AppContent: Renderizando CategoriasPage');
+          return <CategoriasListadoPage />;
+        case 'clientes':
+          Logger.log('🔧 AppContent: Renderizando ClientesListadoPage');
+          return <ClientesListadoPage />;
+        case 'proveedores':
+          Logger.log('🔧 AppContent: Renderizando ProveedoresListadoPage');
+          return <ProveedoresListadoPage />;
+        case 'informes-cliente':
+          Logger.log('🔧 AppContent: Renderizando InformesClientePage');
+          return <InformesClientePage />;
+        case 'informes-vehiculo':
+          Logger.log('🔧 AppContent: Renderizando InformesVehiculoPage');
+          return <InformesVehiculoPage />;
+        case 'informes-vehiculo-detallado':
+          Logger.log('🔧 AppContent: Renderizando InformesVehiculoDetalladoPage');
+          return <InformesVehiculoDetalladoPage />;
+        case 'informes-cuenta-corriente':
+          Logger.log('🔧 AppContent: Renderizando InformesCuentaCorrientePage');
+          return <InformesCuentaCorrientePage />;
+        case 'importar-productos':
+          Logger.log('🔧 AppContent: Renderizando ImportarProductosPage');
+          return <ImportarProductosPage />;
+        case 'importar-servicios':
+          Logger.log('🔧 AppContent: Renderizando ImportarServiciosPage');
+          return <ImportarServiciosPage />;
+        case 'importar-clientes':
+          Logger.log('🔧 AppContent: Renderizando ImportarClientesPage');
+          return <ImportarClientesPage />;
+        case 'exportar':
+          Logger.log('🔧 AppContent: Renderizando ExportarPage');
+          return <ExportarPage />;
         case 'configuracion':
           Logger.log('🔧 AppContent: Renderizando ConfiguracionPage');
           return <ConfiguracionPage />;
-        case 'reportes':
-          return (
-            <div className="p-6 bg-background text-foreground">
-              <h1 className="text-3xl font-bold mb-6">Reportes</h1>
-              <div className="card-professional">
-                <div className="p-6">
-                  <p className="text-muted-foreground">Sistema de reportes - Funcionalidad completa disponible</p>
-                </div>
-              </div>
-            </div>
-          );
+        case 'configuracion-comprobantes':
+          Logger.log('🔧 AppContent: Renderizando ConfiguracionComprobantesPage');
+          return <ConfiguracionComprobantesPage />;
+        case 'configuracion-formularios':
+          Logger.log('🔧 AppContent: Renderizando ConfiguracionFormulariosPage');
+          return <ConfiguracionFormulariosPage />;
+        case 'configuracion-sistema':
+          Logger.log('🔧 AppContent: Renderizando ConfiguracionSistemaPage');
+          return <ConfiguracionSistemaPage />;
+        case 'pagos':
+          Logger.log('🔧 AppContent: Renderizando PagosPage');
+          return <PagosPage />;
         default:
           Logger.warn('⚠️ Página no encontrada:', currentPage);
           return <Dashboard />;
@@ -306,18 +476,10 @@ function AppContent() {
   return (
     <ErrorBoundary>
       <Toaster position="top-right" richColors closeButton />
-      <div className="flex h-screen overflow-hidden">
-        <ManualUsuario isOpen={showManual} onClose={() => setShowManual(false)} />
-        {/* Sidebar */}
-        <aside className="hidden h-screen w-64 border-r border-sidebar-border lg:block">
-          <SidebarComponent currentPage={currentPage} onPageChange={handlePageChange} />
-        </aside>
-
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto">
-          {renderPage()}
-        </main>
-      </div>
+      <ManualUsuario isOpen={showManual} onClose={() => setShowManual(false)} />
+      <DashboardLayout currentPage={currentPage} onPageChange={handlePageChange}>
+        {renderPage()}
+      </DashboardLayout>
     </ErrorBoundary>
   );
 }

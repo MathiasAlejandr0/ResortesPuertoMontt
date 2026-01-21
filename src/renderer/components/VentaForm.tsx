@@ -730,10 +730,10 @@ export default function VentaForm({ isOpen, onClose, onSave }: VentaFormProps) {
 
             {/* Subtotal Repuestos */}
             {repuestosSeleccionados.length > 0 && (
-              <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <span className="font-medium text-gray-900">Subtotal Repuestos:</span>
-                  <span className="font-bold text-blue-600">${subtotalRepuestos.toLocaleString('es-CL')}</span>
+              <div className="mt-4 p-4 bg-red-50 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium text-gray-900">Subtotal Repuestos:</span>
+                      <span className="font-bold text-red-600">${subtotalRepuestos.toLocaleString('es-CL')}</span>
                 </div>
               </div>
             )}

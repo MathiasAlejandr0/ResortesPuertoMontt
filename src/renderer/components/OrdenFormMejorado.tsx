@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useMemo, useDeferredValue, startTransition, useLayoutEffect, useRef } from 'react';
-import { X, User, Car, Calendar, DollarSign, Plus, Search, Wrench, Send, Clock, AlertTriangle, FileText } from 'lucide-react';
+import { X, User, Car, Calendar, DollarSign, Plus, Search, Wrench, Send, Clock, AlertTriangle, FileText, Info, ArrowUp } from 'lucide-react';
 import { Cliente, Vehiculo, OrdenTrabajo, Repuesto, Cotizacion } from '../types';
 import { useApp } from '../contexts/AppContext';
 import { notify, Logger, formatearRUT, Validation } from '../utils/cn';
+import { ActionDialog } from './ActionDialog';
 
 interface OrdenFormProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (orden: OrdenTrabajo) => void;
+  onSave: (data: OrdenTrabajo | Cotizacion, detalles?: DetalleOrdenForm[]) => void;
+  fullPage?: boolean;
+  mode?: 'orden' | 'presupuesto';
 }
 
 interface RepuestoOrden {
@@ -31,10 +34,13 @@ interface DetalleOrdenForm {
 export default function OrdenFormMejorado({ 
   isOpen, 
   onClose, 
-  onSave
+  onSave,
+  fullPage = false,
+  mode = 'orden'
 }: OrdenFormProps) {
+  const isPresupuesto = mode === 'presupuesto';
   // Usar el contexto para acceder a los datos
-  const { clientes, vehiculos, repuestos, cotizaciones, addCliente, addVehiculo, refreshRepuestos } = useApp();
+  const { clientes, vehiculos, repuestos, servicios, cotizaciones, addCliente, addVehiculo, refreshRepuestos } = useApp();
   const [step, setStep] = useState(1); // 1: Cliente, 2: Vehículo, 3: Trabajo y Repuestos, 4: Resumen
   const [tipoCliente, setTipoCliente] = useState<'nuevo' | 'existente'>('existente');
   const [busquedaCliente, setBusquedaCliente] = useState('');
@@ -54,6 +60,7 @@ export default function OrdenFormMejorado({
     modelo: '',
     año: new Date().getFullYear(),
     patente: '',
+    numeroChasis: '',
     color: '',
     kilometraje: 0,
     observaciones: '',
@@ -75,6 +82,34 @@ export default function OrdenFormMejorado({
   const [cotizacionesCliente, setCotizacionesCliente] = useState<Cotizacion[]>([]);
   const [cotizacionSeleccionada, setCotizacionSeleccionada] = useState<Cotizacion | null>(null);
   const [modoVehiculo, setModoVehiculo] = useState<'existente' | 'nuevo'>('existente');
+  
+  // Nuevos campos según Dirup
+  const [fechaIngreso, setFechaIngreso] = useState(new Date().toISOString().split('T')[0]);
+  const [fechaEgreso, setFechaEgreso] = useState('');
+  const [concepto, setConcepto] = useState('REPARACIÓN');
+  const [combustible, setCombustible] = useState('Bajo');
+  const [nombreInspector, setNombreInspector] = useState('');
+  const [numeroSiniestro, setNumeroSiniestro] = useState('');
+  const [franquicia, setFranquicia] = useState('');
+  const [busquedaProducto, setBusquedaProducto] = useState('');
+  const [itemsTabla, setItemsTabla] = useState<Array<{
+    id: number;
+    nombre: string;
+    importe: number;
+    cantidad: number;
+    tipo: 'servicio' | 'repuesto';
+    bonif: number;
+    subtotal: number;
+    iva: number;
+  }>>([]);
+  const [descuento, setDescuento] = useState(0);
+  const [efectivo, setEfectivo] = useState(0);
+  const [cuentaCorriente, setCuentaCorriente] = useState('');
+  const [totalPago, setTotalPago] = useState(0);
+  const [comentarioInterno, setComentarioInterno] = useState('');
+  const [showClienteModal, setShowClienteModal] = useState(false);
+  const [showVehiculoModal, setShowVehiculoModal] = useState(false);
+  const [showProductoModal, setShowProductoModal] = useState(false);
 
   // Vehículos del cliente seleccionado
   const vehiculosDelCliente = useMemo(() => {
@@ -134,6 +169,7 @@ export default function OrdenFormMejorado({
         modelo: '',
         año: new Date().getFullYear(),
         patente: '',
+        numeroChasis: '',
         color: '',
         kilometraje: 0,
         observaciones: '',
@@ -268,6 +304,7 @@ export default function OrdenFormMejorado({
         modelo: '',
         año: new Date().getFullYear(),
         patente: '',
+        numeroChasis: '',
         color: '',
         kilometraje: 0,
         observaciones: '',
@@ -288,6 +325,24 @@ export default function OrdenFormMejorado({
       setUsandoCotizacion(false);
       setTotalBloqueado(false);
       setFotos([]);
+      // Resetear nuevos campos
+      setFechaIngreso(new Date().toISOString().split('T')[0]);
+      setFechaEgreso('');
+      setConcepto('REPARACIÓN');
+      setCombustible('Bajo');
+      setNombreInspector('');
+      setNumeroSiniestro('');
+      setFranquicia('');
+      setBusquedaProducto('');
+      setItemsTabla([]);
+      setDescuento(0);
+      setEfectivo(0);
+      setCuentaCorriente('');
+      setTotalPago(0);
+      setComentarioInterno('');
+      setShowClienteModal(false);
+      setShowVehiculoModal(false);
+      setShowProductoModal(false);
     }
   }, [isOpen]);
 
@@ -354,6 +409,16 @@ export default function OrdenFormMejorado({
     const dia = String(fecha.getDate()).padStart(2, '0');
     const numero = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     return `OT-${año}-${mes}${dia}-${numero}`;
+  };
+
+  // Generar número de presupuesto automático
+  const generarNumeroCotizacion = () => {
+    const fecha = new Date();
+    const año = fecha.getFullYear();
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    const dia = String(fecha.getDate()).padStart(2, '0');
+    const numero = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `COT-${año}-${mes}${dia}-${numero}`;
   };
 
   // Pre-calcular clientes únicos UNA VEZ (evita O(n²) en cada filtro)
@@ -555,52 +620,184 @@ export default function OrdenFormMejorado({
     
     setIsLoading(true);
     try {
-      // Validar precio final (debe ser mayor a 0)
-      const precioFinalStr = typeof precioFinal === 'number' ? String(precioFinal) : (precioFinal || '');
-      const precioFinalNumero = Number(precioFinalStr.replace(/[^0-9]/g, ''));
-      if (!precioFinalNumero || precioFinalNumero <= 0) {
-        notify.error('Validación', 'Debes ingresar un precio final mayor a 0');
-        setIsLoading(false);
-        return;
-      }
-
       let clienteFinal: Cliente;
       let vehiculoFinal: Vehiculo;
+      let detallesParaGuardar: DetalleOrdenForm[] = [];
+      let totalCalculado = 0;
+      let fechaIngresoISO = '';
+      let fechaEgresoISO = '';
+      let observacionesFinal = observaciones;
 
-      // Lógica inteligente: usar cliente existente o crear automáticamente
-      if (tipoCliente === 'existente' && clienteSeleccionado) {
-        clienteFinal = clienteSeleccionado;
-      } else {
-        // Validar RUT si se proporciona
-        if (nuevoCliente.rut) {
-          const validacionRUT = Validation.rut(nuevoCliente.rut);
-          if (!validacionRUT.valido) {
-            notify.error('Validación', validacionRUT.mensaje || 'El RUT ingresado no es válido');
-            setIsLoading(false);
-            return;
-          }
-        }
-        
-        // Buscar cliente existente o crear automáticamente
-        clienteFinal = await encontrarOCrearCliente(nuevoCliente);
-      }
-
-      // Lógica inteligente: usar vehículo existente o crear automáticamente
-      if (vehiculoSeleccionado) {
-        vehiculoFinal = vehiculoSeleccionado;
-      } else {
-        // Validación mínima cuando se crea vehículo manualmente
-        const patenteOk = (nuevoVehiculo.patente || '').trim().length > 0;
-        const marcaOk = (nuevoVehiculo.marca || '').trim().length > 0;
-        const modeloOk = (nuevoVehiculo.modelo || '').trim().length > 0;
-        if (!patenteOk || !marcaOk || !modeloOk) {
-          notify.error('Validación', 'Debes ingresar Patente, Marca y Modelo del vehículo');
-          setStep(2);
+      // Si está en modo fullPage, usar los nuevos campos
+      if (fullPage) {
+        // Validar cliente seleccionado
+        if (!clienteSeleccionado) {
+          notify.error('Validación', 'Debes seleccionar un cliente');
           setIsLoading(false);
           return;
         }
-        // Crear vehículo automáticamente si no existe
-        vehiculoFinal = await encontrarOCrearVehiculo(nuevoVehiculo, clienteFinal.id!);
+        clienteFinal = clienteSeleccionado;
+
+        // Validar vehículo seleccionado
+        if (!vehiculoSeleccionado) {
+          notify.error('Validación', 'Debes seleccionar un vehículo');
+          setIsLoading(false);
+          return;
+        }
+        vehiculoFinal = vehiculoSeleccionado;
+
+        // Validar que haya items en la tabla
+        if (itemsTabla.length === 0) {
+          notify.error('Validación', 'Debes agregar al menos un item (producto o servicio)');
+          setIsLoading(false);
+          return;
+        }
+
+        // Convertir itemsTabla a detallesOrden
+        detallesParaGuardar = itemsTabla.map(item => {
+          // Buscar el repuesto o servicio en la base de datos
+          let repuestoId: number | undefined;
+          let servicioId: number | undefined;
+          
+          if (item.tipo === 'repuesto') {
+            const repuesto = repuestos.find(r => r.nombre === item.nombre || r.id === item.id);
+            repuestoId = repuesto?.id;
+          } else {
+            // Para servicios, necesitaríamos tener acceso a servicios
+            // Por ahora, solo guardamos la descripción
+          }
+
+          return {
+            tipo: item.tipo,
+            repuestoId,
+            servicioId,
+            cantidad: item.cantidad,
+            precio: item.importe,
+            subtotal: item.subtotal,
+            descripcion: item.nombre
+          };
+        });
+
+        // Calcular total desde itemsTabla
+        const subtotalRepuestos = itemsTabla.filter(i => i.tipo === 'repuesto').reduce((sum, item) => sum + item.subtotal, 0);
+        const subtotalServicios = itemsTabla.filter(i => i.tipo === 'servicio').reduce((sum, item) => sum + item.subtotal, 0);
+        const totalNeto = subtotalRepuestos + subtotalServicios - descuento;
+        const iva = totalNeto * 0.19;
+        totalCalculado = totalNeto + iva;
+
+        // Usar fechas del formulario
+        fechaIngresoISO = fechaIngreso ? new Date(fechaIngreso).toISOString() : new Date().toISOString();
+        fechaEgresoISO = fechaEgreso ? new Date(fechaEgreso).toISOString() : '';
+
+        // Combinar observaciones y comentario interno
+        if (comentarioInterno) {
+          observacionesFinal = observaciones 
+            ? `${observaciones}\n\n[Comentario Interno]\n${comentarioInterno}`
+            : `[Comentario Interno]\n${comentarioInterno}`;
+        }
+
+        // Agregar información adicional a observaciones
+        const infoAdicional: string[] = [];
+        if (concepto) infoAdicional.push(`Concepto: ${concepto}`);
+        if (combustible) infoAdicional.push(`Combustible: ${combustible}`);
+        if (nombreInspector) infoAdicional.push(`Inspector: ${nombreInspector}`);
+        if (numeroSiniestro) infoAdicional.push(`Número Siniestro: ${numeroSiniestro}`);
+        if (franquicia) infoAdicional.push(`Franquicia: $${franquicia}`);
+        
+        if (infoAdicional.length > 0) {
+          observacionesFinal = observacionesFinal 
+            ? `${observacionesFinal}\n\n${infoAdicional.join('\n')}`
+            : infoAdicional.join('\n');
+        }
+      } else {
+        // Modo modal (comportamiento original)
+        // Validar precio final (debe ser mayor a 0)
+        const precioFinalStr = typeof precioFinal === 'number' ? String(precioFinal) : (precioFinal || '');
+        const precioFinalNumero = Number(precioFinalStr.replace(/[^0-9]/g, ''));
+        if (!precioFinalNumero || precioFinalNumero <= 0) {
+          notify.error('Validación', 'Debes ingresar un precio final mayor a 0');
+          setIsLoading(false);
+          return;
+        }
+        totalCalculado = precioFinalNumero;
+
+        // Lógica inteligente: usar cliente existente o crear automáticamente
+        if (tipoCliente === 'existente' && clienteSeleccionado) {
+          clienteFinal = clienteSeleccionado;
+        } else {
+          // Validar RUT si se proporciona
+          if (nuevoCliente.rut) {
+            const validacionRUT = Validation.rut(nuevoCliente.rut);
+            if (!validacionRUT.valido) {
+              notify.error('Validación', validacionRUT.mensaje || 'El RUT ingresado no es válido');
+              setIsLoading(false);
+              return;
+            }
+          }
+          
+          // Buscar cliente existente o crear automáticamente
+          clienteFinal = await encontrarOCrearCliente(nuevoCliente);
+        }
+
+        // Lógica inteligente: usar vehículo existente o crear automáticamente
+        if (vehiculoSeleccionado) {
+          vehiculoFinal = vehiculoSeleccionado;
+        } else {
+          // Validación mínima cuando se crea vehículo manualmente
+          const patenteOk = (nuevoVehiculo.patente || '').trim().length > 0;
+          const marcaOk = (nuevoVehiculo.marca || '').trim().length > 0;
+          const modeloOk = (nuevoVehiculo.modelo || '').trim().length > 0;
+          if (!patenteOk || !marcaOk || !modeloOk) {
+            notify.error('Validación', 'Debes ingresar Patente, Marca y Modelo del vehículo');
+            setStep(2);
+            setIsLoading(false);
+            return;
+          }
+          // Crear vehículo automáticamente si no existe
+          vehiculoFinal = await encontrarOCrearVehiculo(nuevoVehiculo, clienteFinal.id!);
+        }
+
+        // Convertir repuestosSeleccionados a detallesOrden si no hay detalles importados desde cotización
+        detallesParaGuardar = detallesOrden;
+        
+        // Si hay repuestos seleccionados pero no están en detallesOrden, agregarlos
+        if (repuestosSeleccionados.length > 0) {
+          const detallesDeRepuestos = repuestosSeleccionados.map(r => ({
+            tipo: 'repuesto' as const,
+            repuestoId: r.id,
+            cantidad: r.cantidad,
+            precio: r.precio,
+            subtotal: r.subtotal,
+            descripcion: r.nombre
+          }));
+          
+          // Si no hay detallesOrden, usar los de repuestos
+          if (detallesOrden.length === 0) {
+            detallesParaGuardar = detallesDeRepuestos;
+          } else {
+            // Si hay detallesOrden, combinar ambos (evitando duplicados)
+            const detallesCombinados = [...detallesOrden];
+            detallesDeRepuestos.forEach(detalleRepuesto => {
+              const existe = detallesCombinados.some(d => 
+                d.tipo === 'repuesto' && d.repuestoId === detalleRepuesto.repuestoId
+              );
+              if (!existe) {
+                detallesCombinados.push(detalleRepuesto);
+              }
+            });
+            detallesParaGuardar = detallesCombinados;
+          }
+        }
+
+        fechaIngresoISO = new Date().toISOString();
+        // Normalizar fechaEntrega a ISO si viene como dd/mm/aaaa
+        let fechaEntregaISO = fechaEntrega;
+        const matchFecha = /^\d{2}\/\d{2}\/\d{4}$/.test(fechaEntrega || '');
+        if (matchFecha && fechaEntrega) {
+          const [dd, mm, yyyy] = fechaEntrega.split('/') as any;
+          fechaEntregaISO = new Date(Number(yyyy), Number(mm) - 1, Number(dd)).toISOString();
+        }
+        fechaEgresoISO = fechaEntregaISO || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       }
 
       // Normalizar prioridad a formato minúsculas esperado por el esquema de validación
@@ -618,93 +815,86 @@ export default function OrdenFormMejorado({
       };
       const prioridadDb = prioridadMap[prioridad] || 'media';
       
-      // Normalizar fechaEntrega a ISO si viene como dd/mm/aaaa
-      let fechaEntregaISO = fechaEntrega;
-      const matchFecha = /^\d{2}\/\d{2}\/\d{4}$/.test(fechaEntrega || '');
-      if (matchFecha && fechaEntrega) {
-        const [dd, mm, yyyy] = fechaEntrega.split('/') as any;
-        fechaEntregaISO = new Date(Number(yyyy), Number(mm) - 1, Number(dd)).toISOString();
-      }
-      const ordenData: OrdenTrabajo & { fotos?: { name: string; dataUrl: string }[] } = {
-        numero: generarNumeroOrden(),
-        clienteId: clienteFinal.id!,
-        vehiculoId: vehiculoFinal.id!,
-        fechaIngreso: new Date().toISOString(),
-        fechaEntrega: fechaEntregaISO || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 días por defecto
-        estado: 'En Progreso', // Las órdenes nuevas se crean automáticamente como "En Progreso"
-        descripcion: descripcionTrabajo,
-        observaciones: observaciones,
-        total: precioFinalNumero,
-        kilometrajeEntrada: kilometrajeEntrada === '' ? 0 : Number(kilometrajeEntrada),
-        kilometrajeSalida: undefined,
-        prioridad: prioridadDb,
-        tecnicoAsignado: tecnicoAsignado
-      };
+      if (isPresupuesto) {
+        const cotizacionData: Cotizacion = {
+          numero: generarNumeroCotizacion(),
+          clienteId: clienteFinal.id!,
+          vehiculoId: vehiculoFinal.id!,
+          fecha: fechaIngresoISO || new Date().toISOString(),
+          validaHasta: fechaEgresoISO || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          estado: 'Pendiente',
+          descripcion: fullPage ? (descripcionTrabajo || concepto || 'Presupuesto') : (descripcionTrabajo || 'Presupuesto'),
+          observaciones: observacionesFinal,
+          total: totalCalculado
+        };
 
-      // Convertir repuestosSeleccionados a detallesOrden si no hay detalles importados desde cotización
-      // IMPORTANTE: Siempre verificar ambos arrays para asegurar que no se pierdan detalles
-      let detallesParaGuardar = detallesOrden;
-      
-      // Si hay repuestos seleccionados pero no están en detallesOrden, agregarlos
-      if (repuestosSeleccionados.length > 0) {
-        const detallesDeRepuestos = repuestosSeleccionados.map(r => ({
-          tipo: 'repuesto' as const,
-          repuestoId: r.id,
-          cantidad: r.cantidad,
-          precio: r.precio,
-          subtotal: r.subtotal,
-          descripcion: r.nombre
-        }));
-        
-        // Si no hay detallesOrden, usar los de repuestos
-        if (detallesOrden.length === 0) {
-          detallesParaGuardar = detallesDeRepuestos;
-        } else {
-          // Si hay detallesOrden, combinar ambos (evitando duplicados)
-          const detallesCombinados = [...detallesOrden];
-          detallesDeRepuestos.forEach(detalleRepuesto => {
-            const existe = detallesCombinados.some(d => 
-              d.tipo === 'repuesto' && d.repuestoId === detalleRepuesto.repuestoId
-            );
-            if (!existe) {
-              detallesCombinados.push(detalleRepuesto);
-            }
-          });
-          detallesParaGuardar = detallesCombinados;
-        }
-      }
+        Logger.log('💾 Guardando presupuesto con detalles:', {
+          modo: fullPage ? 'fullPage' : 'modal',
+          detallesParaGuardarCount: detallesParaGuardar.length,
+          totalCalculado,
+          clienteId: clienteFinal.id,
+          vehiculoId: vehiculoFinal.id
+        });
+
+        await onSave(cotizacionData, detallesParaGuardar);
+      } else {
+        const ordenData: OrdenTrabajo & { fotos?: { name: string; dataUrl: string }[] } = {
+          numero: generarNumeroOrden(),
+          clienteId: clienteFinal.id!,
+          vehiculoId: vehiculoFinal.id!,
+          fechaIngreso: fechaIngresoISO,
+          fechaEntrega: fechaEgresoISO,
+          estado: 'En Progreso', // Las órdenes nuevas se crean automáticamente como "En Progreso"
+          descripcion: fullPage ? (descripcionTrabajo || concepto || 'Orden de trabajo') : descripcionTrabajo,
+          observaciones: observacionesFinal,
+          total: totalCalculado,
+          kilometrajeEntrada: kilometrajeEntrada === '' ? 0 : Number(kilometrajeEntrada),
+          kilometrajeSalida: undefined,
+          prioridad: prioridadDb,
+          tecnicoAsignado: tecnicoAsignado
+        };
       
       // Log para debugging
-      Logger.log('💾 Guardando orden con detalles:', {
-        detallesOrdenCount: detallesOrden.length,
-        repuestosSeleccionadosCount: repuestosSeleccionados.length,
-        detallesParaGuardarCount: detallesParaGuardar.length,
-        usandoCotizacion,
-        detallesParaGuardar: JSON.stringify(detallesParaGuardar, null, 2)
-      });
-      
-      Logger.debug('💾 OrdenFormMejorado: Guardando orden con', detallesParaGuardar.length, 'detalles');
-      Logger.debug('  usandoCotizacion:', usandoCotizacion);
-      Logger.debug('  detallesOrden.length:', detallesOrden.length);
-      Logger.debug('  repuestosSeleccionados.length:', repuestosSeleccionados.length);
-      
-      if (detallesParaGuardar.length > 0) {
-        detallesParaGuardar.forEach((d, idx) => {
-          Logger.debug(`  Detalle ${idx + 1}: tipo=${d.tipo}, servicioId=${d.servicioId}, repuestoId=${d.repuestoId}, cantidad=${d.cantidad}, descripcion=${d.descripcion}`);
+        Logger.log('💾 Guardando orden con detalles:', {
+          modo: fullPage ? 'fullPage' : 'modal',
+          detallesParaGuardarCount: detallesParaGuardar.length,
+          totalCalculado,
+          clienteId: clienteFinal.id,
+          vehiculoId: vehiculoFinal.id,
+          usandoCotizacion,
+          detallesParaGuardar: JSON.stringify(detallesParaGuardar, null, 2)
         });
+        
+        Logger.debug('💾 OrdenFormMejorado: Guardando orden con', detallesParaGuardar.length, 'detalles');
+        Logger.debug('  modo:', fullPage ? 'fullPage' : 'modal');
+        Logger.debug('  totalCalculado:', totalCalculado);
+        if (fullPage) {
+          Logger.debug('  itemsTabla.length:', itemsTabla.length);
+          Logger.debug('  descuento:', descuento);
+        } else {
+          Logger.debug('  usandoCotizacion:', usandoCotizacion);
+          Logger.debug('  detallesOrden.length:', detallesOrden.length);
+          Logger.debug('  repuestosSeleccionados.length:', repuestosSeleccionados.length);
+        }
+        
+        if (detallesParaGuardar.length > 0) {
+          detallesParaGuardar.forEach((d, idx) => {
+            Logger.debug(`  Detalle ${idx + 1}: tipo=${d.tipo}, servicioId=${d.servicioId}, repuestoId=${d.repuestoId}, cantidad=${d.cantidad}, descripcion=${d.descripcion}`);
+          });
+        }
+        
+        // Validar que tenemos detalles si usamos cotización
+        if (usandoCotizacion && detallesParaGuardar.length === 0) {
+          Logger.warn('⚠️ Importando desde cotización pero no hay detalles para guardar');
+          Logger.error('❌ OrdenFormMejorado: CRÍTICO - Importando desde cotización pero no hay detalles para guardar!');
+          notify.error('Error', 'No se encontraron detalles en la cotización para importar');
+          setIsLoading(false);
+          return;
+        }
+        
+        // Pasar también los detalles (servicios y repuestos) para que el contenedor los persista
+        await onSave(ordenData as any, detallesParaGuardar as any);
       }
-      
-      // Validar que tenemos detalles si usamos cotización
-      if (usandoCotizacion && detallesParaGuardar.length === 0) {
-        Logger.warn('⚠️ Importando desde cotización pero no hay detalles para guardar');
-        Logger.error('❌ OrdenFormMejorado: CRÍTICO - Importando desde cotización pero no hay detalles para guardar!');
-        notify.error('Error', 'No se encontraron detalles en la cotización para importar');
-        setIsLoading(false);
-        return;
-      }
-      
-      // Pasar también los detalles (servicios y repuestos) para que el contenedor los persista
-      await onSave(ordenData as any, detallesParaGuardar as any);
       
       // Resetear formulario completamente
       setStep(1);
@@ -726,6 +916,7 @@ export default function OrdenFormMejorado({
         modelo: '',
         año: new Date().getFullYear(),
         patente: '',
+        numeroChasis: '',
         color: '',
         kilometraje: 0,
         observaciones: '',
@@ -733,6 +924,7 @@ export default function OrdenFormMejorado({
       });
       setDescripcionTrabajo('');
       setRepuestosSeleccionados([]);
+      setDetallesOrden([]);
       setPrecioFinal('');
       setObservaciones('');
       setPrioridad('normal');
@@ -741,6 +933,27 @@ export default function OrdenFormMejorado({
       setFechaEntrega('');
       setCotizacionSeleccionada(null);
       setCotizacionesCliente([]);
+      setUsandoCotizacion(false);
+      setTotalBloqueado(false);
+      setFotos([]);
+      // Resetear nuevos campos
+      setFechaIngreso(new Date().toISOString().split('T')[0]);
+      setFechaEgreso('');
+      setConcepto('REPARACIÓN');
+      setCombustible('Bajo');
+      setNombreInspector('');
+      setNumeroSiniestro('');
+      setFranquicia('');
+      setBusquedaProducto('');
+      setItemsTabla([]);
+      setDescuento(0);
+      setEfectivo(0);
+      setCuentaCorriente('');
+      setTotalPago(0);
+      setComentarioInterno('');
+      setShowClienteModal(false);
+      setShowVehiculoModal(false);
+      setShowProductoModal(false);
       // Resetear detallesOrden SOLO después de guardar exitosamente
       setDetallesOrden([]);
       setIsLoading(false);
@@ -753,39 +966,21 @@ export default function OrdenFormMejorado({
     }
   };
 
+  // Si no está abierto, no renderizar nada
   if (!isOpen) return null;
 
-  return (
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" 
-      onClick={onClose}
-      style={{ pointerEvents: 'auto' }}
-    >
-      <div 
-        className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" 
-        onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-        style={{ pointerEvents: 'auto' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-              <Wrench className="h-5 w-5 text-red-600" />
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">Nueva Orden de Trabajo</h2>
-              <p className="text-sm text-gray-500">Paso {step} de 4</p>
-            </div>
+  // Contenido del formulario (reutilizable para ambos modos)
+  const formContent = (
+    <div className="h-full">
+        {/* Header interno con información del paso */}
+        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-200">
+          <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+            <Wrench className="h-5 w-5 text-red-600" />
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-            title="Cerrar formulario"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Nueva Orden de Trabajo</h2>
+            <p className="text-sm text-gray-500">Paso {step} de 4</p>
+          </div>
         </div>
 
         {/* Progress Bar */}
@@ -848,8 +1043,8 @@ export default function OrdenFormMejorado({
 
                 {tipoCliente === 'existente' ? (
                   <div className="space-y-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <p className="text-sm text-blue-800">
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <p className="text-sm text-red-800">
                         <strong>💡 Buscar Cliente:</strong> Selecciona un cliente existente de la lista. 
                         Si no encuentras el cliente, cambia a "Nuevo Cliente" para ingresar sus datos.
                       </p>
@@ -896,10 +1091,10 @@ export default function OrdenFormMejorado({
 
                     {/* Mostrar cotizaciones del cliente si existen */}
                     {cotizacionesCliente.length > 0 && (
-                      <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                         <div className="flex items-center gap-2 mb-3">
-                          <FileText className="h-4 w-4 text-blue-600" />
-                          <h4 className="font-medium text-blue-900">
+                          <FileText className="h-4 w-4 text-red-600" />
+                          <h4 className="font-medium text-red-900">
                             Cotizaciones Previas del Cliente ({cotizacionesCliente.length})
                           </h4>
                         </div>
@@ -912,7 +1107,7 @@ export default function OrdenFormMejorado({
                               await importarDesdeCotizacion(cotiSel);
                             }
                           }}
-                          className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                          className="w-full px-3 py-2 border border-red-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 mb-3"
                           aria-label="Seleccionar cotización previa del cliente"
                           title="Seleccionar cotización previa del cliente"
                         >
@@ -927,7 +1122,7 @@ export default function OrdenFormMejorado({
                           <button
                             type="button"
                             onClick={importarDesdeCotizacion}
-                            className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                            className="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm font-medium"
                           >
                             📥 Importar Datos de Cotización
                           </button>
@@ -1116,6 +1311,18 @@ export default function OrdenFormMejorado({
                       placeholder="Corolla"
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      N° Chasis
+                    </label>
+                    <input
+                      type="text"
+                      value={nuevoVehiculo.numeroChasis || ''}
+                      onChange={(e) => setNuevoVehiculo(prev => ({ ...prev, numeroChasis: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                      placeholder="Opcional"
+                    />
+                  </div>
                 </div>
                 )}
 
@@ -1264,10 +1471,10 @@ export default function OrdenFormMejorado({
 
                 {/* Resumen de Repuestos */}
                 {repuestosSeleccionados.length > 0 && (
-                  <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                  <div className="mt-4 p-4 bg-red-50 rounded-lg">
                     <div className="flex justify-between items-center">
                       <span className="font-medium text-gray-900">Subtotal Repuestos:</span>
-                      <span className="font-bold text-blue-600">${subtotalRepuestos.toLocaleString('es-CL')}</span>
+                      <span className="font-bold text-red-600">${subtotalRepuestos.toLocaleString('es-CL')}</span>
                     </div>
                   </div>
                 )}
@@ -1467,45 +1674,713 @@ export default function OrdenFormMejorado({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-between items-center p-6 border-t border-gray-200">
-          <button
-            onClick={() => step > 1 ? setStep(step - 1) : onClose()}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-          >
-            {step > 1 ? 'Anterior' : 'Cancelar'}
-          </button>
-          
-          <div className="flex gap-3">
-            {step < 4 ? (
-              <button
-                onClick={() => setStep(usandoCotizacion ? (step === 1 ? 4 : Math.min(4, step + 1)) : step + 1)}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
-              >
-                Siguiente
-              </button>
-            ) : (
-              <button
-                onClick={handleSave}
-                disabled={isLoading}
-                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    Guardando...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    Crear Orden de Trabajo
-                  </>
-                )}
-              </button>
-            )}
+        {/* Footer - Solo en modo modal */}
+        {!fullPage && (
+          <div className="flex justify-between items-center p-6 border-t border-gray-200">
+            <button
+              onClick={() => step > 1 ? setStep(step - 1) : onClose()}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            >
+              {step > 1 ? 'Anterior' : 'Cancelar'}
+            </button>
+            
+            <div className="flex gap-3">
+              {step < 4 ? (
+                <button
+                  onClick={() => setStep(usandoCotizacion ? (step === 1 ? 4 : Math.min(4, step + 1)) : step + 1)}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+                >
+                  Siguiente
+                </button>
+              ) : (
+                <button
+                  onClick={handleSave}
+                  disabled={isLoading}
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      Crear Orden de Trabajo
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+  );
+
+  // Modo página completa (estilo Dirup) - Formulario completo de una sola página
+  if (fullPage) {
+    // Calcular totales
+    const subtotalRepuestos = itemsTabla.filter(i => i.tipo === 'repuesto').reduce((sum, item) => sum + item.subtotal, 0);
+    const subtotalServicios = itemsTabla.filter(i => i.tipo === 'servicio').reduce((sum, item) => sum + item.subtotal, 0);
+    const totalNeto = subtotalRepuestos + subtotalServicios - descuento;
+    const iva = totalNeto * 0.19;
+    const total = totalNeto + iva;
+    
+    return (
+      <div className="flex flex-col h-full bg-gray-50">
+        {/* Header estilo Dirup */}
+        <div className="bg-black text-white px-6 py-4 flex items-center justify-between border-b border-gray-800">
+          <h1 className="text-xl font-semibold">{isPresupuesto ? 'Presupuesto' : 'Orden'}</h1>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-white bg-transparent hover:bg-gray-800 rounded transition-colors"
+            >
+              Volver
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-white bg-transparent hover:bg-gray-800 rounded transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={isLoading}
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  Guardando...
+                </>
+              ) : (
+                'Confirmar'
+              )}
+            </button>
           </div>
         </div>
+        
+        {/* Contenido del formulario completo */}
+        <div className="flex-1 overflow-y-auto bg-gray-50 p-6">
+          <div className="max-w-7xl mx-auto space-y-6">
+            {/* Sección 1: Fechas y Técnico */}
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+              <div className={`grid grid-cols-1 ${isPresupuesto ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4`}>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {isPresupuesto ? 'Fecha emisión:' : 'Fecha ingreso:'}
+                  </label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="date"
+                      value={fechaIngreso}
+                      onChange={(e) => setFechaIngreso(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {isPresupuesto ? 'Válida hasta:' : 'Fecha egreso:'}
+                  </label>
+                  <div className="relative">
+                    <Info className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      type="date"
+                      value={fechaEgreso}
+                      onChange={(e) => setFechaEgreso(e.target.value)}
+                      className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                      placeholder="dd/mm/aaaa, --:--"
+                    />
+                  </div>
+                </div>
+                {!isPresupuesto && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Técnico:</label>
+                    <input
+                      type="text"
+                      value={tecnicoAsignado}
+                      onChange={(e) => setTecnicoAsignado(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                      placeholder="Nombre del técnico"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Sección 2: Cliente y Vehículo */}
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Buscar cliente:</label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        value={clienteSeleccionado ? `${clienteSeleccionado.nombre} (${clienteSeleccionado.rut})` : busquedaCliente}
+                        onChange={(e) => setBusquedaCliente(e.target.value)}
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                        placeholder="..."
+                      />
+                      {clienteSeleccionado && (
+                        <div className="mt-2 text-xs text-gray-600">
+                          RUT: {clienteSeleccionado.rut} | Tel: {clienteSeleccionado.telefono}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setShowClienteModal(true)}
+                      className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Buscar Vehículo:</label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Car className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        value={vehiculoSeleccionado ? `${vehiculoSeleccionado.marca} ${vehiculoSeleccionado.modelo} - ${vehiculoSeleccionado.patente}` : ''}
+                        onChange={(e) => {}}
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                        placeholder="..."
+                      />
+                      {vehiculoSeleccionado && (
+                        <div className="mt-2 text-xs text-gray-600">
+                          Patente: {vehiculoSeleccionado.patente}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setShowVehiculoModal(true)}
+                      className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Sección 3: Concepto, Combustible, Recordatorio */}
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+              <div className={`grid grid-cols-1 ${isPresupuesto ? 'md:grid-cols-1' : 'md:grid-cols-3'} gap-4`}>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Concepto:</label>
+                  <select
+                    value={concepto}
+                    onChange={(e) => setConcepto(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                  >
+                    <option value="REPARACIÓN">REPARACIÓN</option>
+                    <option value="MANTENCIÓN">MANTENCIÓN</option>
+                    <option value="REVISIÓN">REVISIÓN</option>
+                    <option value="OTRO">OTRO</option>
+                  </select>
+                </div>
+                {!isPresupuesto && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Combustible:</label>
+                      <select
+                        value={combustible}
+                        onChange={(e) => setCombustible(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                      >
+                        <option value="Bajo">Bajo</option>
+                        <option value="Medio">Medio</option>
+                        <option value="Alto">Alto</option>
+                        <option value="Lleno">Lleno</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Recordatorio:</label>
+                      <button
+                        type="button"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-red-600 hover:bg-red-700 text-white transition-colors"
+                      >
+                        Programar
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Sección 4: Kilometraje, Inspector, Número Siniestro, Franquicia */}
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Kilometraje:</label>
+                  <div className="flex">
+                    <span className="px-3 py-2 bg-gray-100 border border-r-0 border-gray-300 rounded-l-md text-gray-700">KM</span>
+                    <input
+                      type="number"
+                      value={kilometrajeEntrada}
+                      onChange={(e) => setKilometrajeEntrada(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-r-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Nombre Inspector:</label>
+                  <input
+                    type="text"
+                    value={nombreInspector}
+                    onChange={(e) => setNombreInspector(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                    placeholder="Nombre del inspector"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Número Siniestro:</label>
+                  <input
+                    type="text"
+                    value={numeroSiniestro}
+                    onChange={(e) => setNumeroSiniestro(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                    placeholder="Número de siniestro"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Franquicia:</label>
+                  <div className="flex">
+                    <span className="px-3 py-2 bg-gray-100 border border-r-0 border-gray-300 rounded-l-md text-gray-700">$</span>
+                    <input
+                      type="number"
+                      value={franquicia}
+                      onChange={(e) => setFranquicia(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-r-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Sección 5: Tabla de Items */}
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="text-sm font-medium text-gray-700">Buscar Producto o Servicio...</label>
+                  <button
+                    onClick={() => setShowProductoModal(true)}
+                    className="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={busquedaProducto}
+                  onChange={(e) => setBusquedaProducto(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                  placeholder="Buscar producto o servicio..."
+                />
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100 text-gray-900">
+                      <th className="px-4 py-2 border border-gray-300 text-left">Item</th>
+                      <th className="px-4 py-2 border border-gray-300 text-left">Importe</th>
+                      <th className="px-4 py-2 border border-gray-300 text-left">Cantidad</th>
+                      <th className="px-4 py-2 border border-gray-300 text-left">Tipo</th>
+                      <th className="px-4 py-2 border border-gray-300 text-left">Bonif.</th>
+                      <th className="px-4 py-2 border border-gray-300 text-left">Subtotal</th>
+                      <th className="px-4 py-2 border border-gray-300 text-left">IVA</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {itemsTabla.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-4 text-center text-gray-500 border border-gray-300">
+                          No hay items agregados
+                        </td>
+                      </tr>
+                    ) : (
+                      itemsTabla.map((item, index) => (
+                        <tr key={item.id} className="border-b border-gray-300">
+                          <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">{item.nombre}</td>
+                          <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">${item.importe.toLocaleString('es-CL')}</td>
+                          <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">
+                            <input
+                              type="number"
+                              value={item.cantidad}
+                              onChange={(e) => {
+                                const newItems = [...itemsTabla];
+                                newItems[index].cantidad = Number(e.target.value);
+                                newItems[index].subtotal = newItems[index].importe * newItems[index].cantidad * (1 - newItems[index].bonif / 100);
+                                newItems[index].iva = newItems[index].subtotal * 0.19;
+                                setItemsTabla(newItems);
+                              }}
+                              className="w-20 px-2 py-1 border border-gray-300 rounded bg-white text-gray-900"
+                            />
+                          </td>
+                          <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">
+                            <select
+                              value={item.tipo}
+                              onChange={(e) => {
+                                const newItems = [...itemsTabla];
+                                newItems[index].tipo = e.target.value as 'servicio' | 'repuesto';
+                                setItemsTabla(newItems);
+                              }}
+                              className="px-2 py-1 border border-gray-300 rounded bg-white text-gray-900"
+                            >
+                              <option value="servicio">Servicio</option>
+                              <option value="repuesto">Repuesto</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">
+                            <input
+                              type="number"
+                              value={item.bonif}
+                              onChange={(e) => {
+                                const newItems = [...itemsTabla];
+                                newItems[index].bonif = Number(e.target.value);
+                                newItems[index].subtotal = newItems[index].importe * newItems[index].cantidad * (1 - newItems[index].bonif / 100);
+                                newItems[index].iva = newItems[index].subtotal * 0.19;
+                                setItemsTabla(newItems);
+                              }}
+                              className="w-20 px-2 py-1 border border-gray-300 rounded bg-white text-gray-900"
+                            />
+                          </td>
+                          <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">${item.subtotal.toLocaleString('es-CL')}</td>
+                          <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">${item.iva.toLocaleString('es-CL')}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Sección 6: Resumen y Pago */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Resumen */}
+              <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <h3 className="text-lg font-semibold mb-4">Resumen</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span>Descuento:</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={descuento}
+                        onChange={(e) => setDescuento(Number(e.target.value))}
+                        className="w-20 px-2 py-1 border border-gray-300 rounded text-right"
+                      />
+                      <span>%</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Repuestos:</span>
+                    <span>${subtotalRepuestos.toLocaleString('es-CL')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Mano de obra:</span>
+                    <span>${subtotalServicios.toLocaleString('es-CL')}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold border-t pt-2">
+                    <span>Total neto:</span>
+                    <span>${totalNeto.toLocaleString('es-CL')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>IVA:</span>
+                    <span>${iva.toLocaleString('es-CL')}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-lg border-t pt-2">
+                    <span>Total:</span>
+                    <span>${total.toLocaleString('es-CL')}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pago */}
+              <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <h3 className="text-lg font-semibold mb-4">Pago</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span>Efectivo:</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={efectivo}
+                        onChange={(e) => setEfectivo(Number(e.target.value))}
+                        className="w-32 px-2 py-1 border border-gray-300 rounded text-right"
+                      />
+                      <Info className="h-4 w-4 text-red-600" />
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>Cuenta corriente:</span>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={cuentaCorriente}
+                        onChange={(e) => setCuentaCorriente(e.target.value)}
+                        className="px-2 py-1 border border-gray-300 rounded"
+                      >
+                        <option value="">Seleccionar</option>
+                      </select>
+                      <input
+                        type="number"
+                        value={totalPago}
+                        onChange={(e) => setTotalPago(Number(e.target.value))}
+                        className="w-32 px-2 py-1 border border-gray-300 rounded text-right"
+                      />
+                      <AlertTriangle className="h-4 w-4 text-red-600" />
+                    </div>
+                  </div>
+                  <div className="flex justify-between font-bold text-lg border-t pt-2">
+                    <span>Total pago:</span>
+                    <span>${(efectivo + totalPago).toLocaleString('es-CL')}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Sección 7: Observaciones y Comentario Interno */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Observaciones:</label>
+                <textarea
+                  value={observaciones}
+                  onChange={(e) => setObservaciones(e.target.value)}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                  placeholder="Observaciones..."
+                />
+              </div>
+              <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Comentario Interno:</label>
+                <textarea
+                  value={comentarioInterno}
+                  onChange={(e) => setComentarioInterno(e.target.value)}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                  placeholder="Comentario interno..."
+                />
+              </div>
+            </div>
+
+            {/* Botón Ir arriba */}
+            <div className="flex justify-end">
+              <button
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors flex items-center gap-2"
+              >
+                <ArrowUp className="h-4 w-4" />
+                Ir arriba
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Modales de selección */}
+        {/* Modal Cliente */}
+        {showClienteModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Seleccionar Cliente</h2>
+                <button onClick={() => setShowClienteModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={busquedaCliente}
+                  onChange={(e) => setBusquedaCliente(e.target.value)}
+                  placeholder="Buscar por nombre, RUT o teléfono..."
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+              <div className="max-h-96 overflow-y-auto">
+                {clientesFiltrados.map((cliente) => (
+                  <div
+                    key={cliente.id}
+                    onClick={() => {
+                      setClienteSeleccionado(cliente);
+                      setShowClienteModal(false);
+                    }}
+                    className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100"
+                  >
+                    <div className="flex items-center gap-3">
+                      <User className="h-5 w-5 text-gray-400" />
+                      <div>
+                        <p className="font-medium text-gray-900">{cliente.nombre}</p>
+                        <p className="text-sm text-gray-500">
+                          RUT: {cliente.rut} | Tel: {cliente.telefono}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Vehículo */}
+        {showVehiculoModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Seleccionar Vehículo</h2>
+                <button onClick={() => setShowVehiculoModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              {clienteSeleccionado ? (
+                <div className="max-h-96 overflow-y-auto">
+                  {vehiculosDelCliente.map((vehiculo) => (
+                    <div
+                      key={vehiculo.id}
+                      onClick={() => {
+                        setVehiculoSeleccionado(vehiculo);
+                        setShowVehiculoModal(false);
+                      }}
+                      className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Car className="h-5 w-5 text-gray-400" />
+                        <div>
+                          <p className="font-medium text-gray-900">{vehiculo.marca} {vehiculo.modelo} ({vehiculo.año})</p>
+                          <p className="text-sm text-gray-500">Patente: {vehiculo.patente}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500">Primero debe seleccionar un cliente</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Modal Producto/Servicio */}
+        {showProductoModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Agregar Producto o Servicio</h2>
+                <button onClick={() => setShowProductoModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={busquedaProducto}
+                  onChange={(e) => setBusquedaProducto(e.target.value)}
+                  placeholder="Buscar producto o servicio..."
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+              <div className="max-h-96 overflow-y-auto">
+                {/* Repuestos */}
+                {repuestosFiltrados
+                  .filter(r => !busquedaProducto || r.nombre.toLowerCase().includes(busquedaProducto.toLowerCase()) || r.codigo?.toLowerCase().includes(busquedaProducto.toLowerCase()))
+                  .map((repuesto) => (
+                    <div
+                      key={`repuesto-${repuesto.id}`}
+                      onClick={() => {
+                        const newItem = {
+                          id: repuesto.id || Date.now(),
+                          nombre: repuesto.nombre,
+                          importe: repuesto.precio || 0,
+                          cantidad: 1,
+                          tipo: 'repuesto' as const,
+                          bonif: 0,
+                          subtotal: repuesto.precio || 0,
+                          iva: (repuesto.precio || 0) * 0.19
+                        };
+                        setItemsTabla([...itemsTabla, newItem]);
+                        setShowProductoModal(false);
+                        setBusquedaProducto('');
+                      }}
+                      className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 flex justify-between"
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900">{repuesto.nombre}</p>
+                        <p className="text-sm text-gray-500">{repuesto.codigo || 'Sin código'} | Stock: {repuesto.stock || 0} | Repuesto</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium text-gray-900">${(repuesto.precio || 0).toLocaleString('es-CL')}</p>
+                      </div>
+                    </div>
+                  ))}
+                
+                {/* Servicios */}
+                {servicios
+                  .filter(s => !busquedaProducto || s.nombre.toLowerCase().includes(busquedaProducto.toLowerCase()))
+                  .map((servicio) => (
+                    <div
+                      key={`servicio-${servicio.id}`}
+                      onClick={() => {
+                        const newItem = {
+                          id: servicio.id || Date.now(),
+                          nombre: servicio.nombre,
+                          importe: servicio.precio || 0,
+                          cantidad: 1,
+                          tipo: 'servicio' as const,
+                          bonif: 0,
+                          subtotal: servicio.precio || 0,
+                          iva: (servicio.precio || 0) * 0.19
+                        };
+                        setItemsTabla([...itemsTabla, newItem]);
+                        setShowProductoModal(false);
+                        setBusquedaProducto('');
+                      }}
+                      className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 flex justify-between"
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900">{servicio.nombre}</p>
+                        <p className="text-sm text-gray-500">{servicio.descripcion || 'Sin descripción'} | Servicio</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium text-gray-900">${(servicio.precio || 0).toLocaleString('es-CL')}</p>
+                      </div>
+                    </div>
+                  ))}
+                
+                {repuestosFiltrados.length === 0 && servicios.length === 0 && (
+                  <div className="p-3 text-center text-gray-500">
+                    No se encontraron productos o servicios
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    );
+  }
+
+  // Modo modal (comportamiento original)
+  return (
+    <ActionDialog
+      open={isOpen}
+      onOpenChange={onClose}
+      variant="modal"
+      size="xl"
+      title={step === 1 ? "Seleccionar Cliente" : step === 2 ? "Seleccionar Vehículo" : step === 3 ? "Detalles del Trabajo" : "Resumen de la Orden"}
+    >
+      {formContent}
+    </ActionDialog>
   );
 }

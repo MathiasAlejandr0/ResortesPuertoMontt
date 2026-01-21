@@ -403,9 +403,9 @@ export default function ManualUsuario({ isOpen, onClose }: Props) {
           </div>
 
           {/* Soporte */}
-          <section className="bg-blue-50 rounded-lg p-6 border border-blue-200 mt-6">
+          <section className="bg-red-50 rounded-lg p-6 border border-red-200 mt-6">
             <h4 className="font-semibold text-gray-800 flex items-center gap-2 mb-3">
-              <Phone className="h-5 w-5 text-blue-600" />
+              <Phone className="h-5 w-5 text-red-600" />
               Soporte Técnico
             </h4>
             <div className="grid md:grid-cols-2 gap-4 text-sm">

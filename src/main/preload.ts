@@ -65,13 +65,25 @@ const electronAPI = {
   restoreBackup: (backupId: string) => ipcRenderer.invoke('restore-backup', backupId),
   deleteBackup: (backupId: string) => ipcRenderer.invoke('delete-backup', backupId),
   getBackups: () => ipcRenderer.invoke('get-backups'),
+
+  // Logs
+  getLogsSummary: () => ipcRenderer.invoke('get-logs-summary'),
+  openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
+  exportLogs: () => ipcRenderer.invoke('export-logs'),
   
   // Importación de datos
   importarRepuestos: (datos: any[]) => ipcRenderer.invoke('importar-repuestos', datos),
   limpiarRepuestos: () => ipcRenderer.invoke('limpiar-repuestos'),
+  limpiarServicios: () => ipcRenderer.invoke('limpiar-servicios'),
+  limpiarClientes: () => ipcRenderer.invoke('limpiar-clientes'),
   obtenerEstadisticasRepuestos: () => ipcRenderer.invoke('obtener-estadisticas-repuestos'),
   limpiarDuplicadosClientes: () => ipcRenderer.invoke('limpiar-duplicados-clientes'),
   procesarExcelRepuestos: () => ipcRenderer.invoke('procesar-excel-repuestos'),
+  procesarExcelServicios: () => ipcRenderer.invoke('procesar-excel-servicios'),
+  procesarExcelClientes: () => ipcRenderer.invoke('procesar-excel-clientes'),
+  
+  // Escáner de facturas
+  scanInvoice: () => ipcRenderer.invoke('scan-invoice'),
 
   // Eventos desde el proceso principal (menú)
   on: (channel: string, listener: (...args: any[]) => void) => {
@@ -98,6 +110,24 @@ const electronAPI = {
   confirmarPagoCuota: (data: { cuotaId: number; montoPagado: number; fechaPago: string; observaciones?: string }) => 
     ipcRenderer.invoke('confirmar-pago-cuota', data),
   actualizarEstadosCuotasVencidas: () => ipcRenderer.invoke('actualizar-estados-cuotas-vencidas'),
+  
+  // Caja Diaria
+  getEstadoCaja: () => ipcRenderer.invoke('get-estado-caja'),
+  abrirCaja: (montoInicial: number, observaciones?: string) => ipcRenderer.invoke('abrir-caja', montoInicial, observaciones),
+  cerrarCaja: (montoFinal: number, observaciones?: string) => ipcRenderer.invoke('cerrar-caja', montoFinal, observaciones),
+  registrarMovimientoCaja: (movimiento: any) => ipcRenderer.invoke('registrar-movimiento-caja', movimiento),
+  getMovimientosCajaPorFecha: (fecha: string) => ipcRenderer.invoke('get-movimientos-caja-por-fecha', fecha),
+  getArqueoCaja: (fecha: string) => ipcRenderer.invoke('get-arqueo-caja', fecha),
+  
+  // Comisiones de Técnicos
+  calcularYGuardarComision: (ordenId: number, tecnicoId: number | null, tecnicoNombre: string, porcentajeComision: number) =>
+    ipcRenderer.invoke('calcular-y-guardar-comision', ordenId, tecnicoId, tecnicoNombre, porcentajeComision),
+  getReporteComisiones: (mes: string) => ipcRenderer.invoke('get-reporte-comisiones', mes),
+  getResumenComisionesPorTecnico: (mes: string) => ipcRenderer.invoke('get-resumen-comisiones-por-tecnico', mes),
+  
+  // Agenda
+  updateFechaProgramada: (ordenId: number, fechaProgramada: string) => ipcRenderer.invoke('update-fecha-programada', ordenId, fechaProgramada),
+  getOrdenesParaAgenda: (fechaInicio: string, fechaFin: string) => ipcRenderer.invoke('get-ordenes-para-agenda', fechaInicio, fechaFin),
 };
 
 // Exponer la API al contexto del renderer

@@ -37,6 +37,14 @@ interface BackupInfo {
   descripcion: string;
 }
 
+interface LogFileInfo {
+  name: string;
+  size: string;
+  sizeBytes: number;
+  updatedAt: string;
+  createdAt: string;
+}
+
 export default function ConfiguracionPage() {
   const { refreshRepuestos } = useApp();
   const [activeTab, setActiveTab] = useState('negocio');
@@ -46,6 +54,12 @@ export default function ConfiguracionPage() {
   const [backupInterval, setBackupInterval] = useState(30); // minutos
   const [lastBackup, setLastBackup] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [logFiles, setLogFiles] = useState<LogFileInfo[]>([]);
+  const [recentLogs, setRecentLogs] = useState<string[]>([]);
+  const [recentErrors, setRecentErrors] = useState<string[]>([]);
+  const [logDir, setLogDir] = useState<string>('');
+  const [logLoading, setLogLoading] = useState(false);
+  const [logExporting, setLogExporting] = useState(false);
 
   // Estados para importación de datos
   const [importacionStats, setImportacionStats] = useState({
@@ -305,6 +319,69 @@ Email: {EMAIL_TALLER}`
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const loadLogs = async () => {
+    setLogLoading(true);
+    try {
+      if (!window.electronAPI?.getLogsSummary) {
+        console.warn('electronAPI.getLogsSummary no está disponible');
+        setLogFiles([]);
+        setRecentLogs([]);
+        setRecentErrors([]);
+        setLogDir('');
+        return;
+      }
+
+      const result = await window.electronAPI.getLogsSummary();
+      setLogFiles(result?.files || []);
+      setRecentLogs(result?.recent?.app || []);
+      setRecentErrors(result?.recent?.error || []);
+      setLogDir(result?.logDir || '');
+    } catch (logError) {
+      console.error('Error cargando logs:', logError);
+      toast.error('Error al cargar los logs');
+    } finally {
+      setLogLoading(false);
+    }
+  };
+
+  const handleOpenLogsFolder = async () => {
+    try {
+      if (!window.electronAPI?.openLogsFolder) {
+        toast.error('No se pudo abrir la carpeta de logs');
+        return;
+      }
+      const result = await window.electronAPI.openLogsFolder();
+      if (result?.success !== true) {
+        toast.error(result?.error || 'No se pudo abrir la carpeta de logs');
+        return;
+      }
+    } catch (logError) {
+      console.error('Error abriendo carpeta de logs:', logError);
+      toast.error('No se pudo abrir la carpeta de logs');
+    }
+  };
+
+  const handleExportLogs = async () => {
+    setLogExporting(true);
+    try {
+      if (!window.electronAPI?.exportLogs) {
+        toast.error('No se pudo exportar los logs');
+        return;
+      }
+      const result = await window.electronAPI.exportLogs();
+      if (result?.success) {
+        toast.success(`Logs exportados: ${result.path}`);
+      } else if (!result?.canceled) {
+        toast.error(result?.error || 'No se pudo exportar los logs');
+      }
+    } catch (logError) {
+      console.error('Error exportando logs:', logError);
+      toast.error('No se pudo exportar los logs');
+    } finally {
+      setLogExporting(false);
+    }
   };
 
   const handleSaveMensajes = async () => {
@@ -734,6 +811,8 @@ Email: {EMAIL_TALLER}`
           }
         }
       }).catch(console.error);
+    } else if (activeTab === 'logs') {
+      loadLogs();
     }
   }, [activeTab]);
 
@@ -771,7 +850,8 @@ Email: {EMAIL_TALLER}`
     { id: 'backups', name: 'Backups', icon: Database },
     { id: 'mensajes', name: 'Mensajes', icon: FileText },
     { id: 'importacion', name: 'Importación', icon: Upload },
-    { id: 'integridad', name: 'Integridad', icon: Wrench }
+    { id: 'integridad', name: 'Integridad', icon: Wrench },
+    { id: 'logs', name: 'Logs', icon: AlertTriangle }
   ];
 
   return (
@@ -1031,7 +1111,7 @@ Email: {EMAIL_TALLER}`
                     <Button 
                       onClick={() => createBackup('automatico')}
                       disabled={isLoading}
-                      className="bg-blue-600 hover:bg-blue-700"
+                      className="bg-red-600 hover:bg-red-700"
                     >
                       <RefreshCw className="h-4 w-4 mr-2" />
                       Crear Backup Ahora
@@ -1091,7 +1171,7 @@ Email: {EMAIL_TALLER}`
                     <div key={backup.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                       <div className="flex items-center gap-4">
                         <div className={`w-3 h-3 rounded-full ${
-                          backup.tipo === 'manual' ? 'bg-blue-500' : 'bg-green-500'
+                          backup.tipo === 'manual' ? 'bg-red-500' : 'bg-green-500'
                         }`}></div>
                         <div>
                           <p className="font-medium text-gray-900">
@@ -1111,7 +1191,7 @@ Email: {EMAIL_TALLER}`
                           variant="outline"
                           onClick={() => restoreBackup(backup.id)}
                           disabled={isLoading}
-                          className="text-blue-600 hover:text-blue-700"
+                          className="text-red-600 hover:text-red-700"
                         >
                           <RotateCcw className="h-4 w-4 mr-1" />
                           Restaurar
@@ -1171,6 +1251,118 @@ Email: {EMAIL_TALLER}`
                       <li key={k}>{k}: {v}</li>
                     ))}
                   </ul>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {activeTab === 'logs' && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5" />
+                Logs del Sistema
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Visualiza y exporta los logs para diagnóstico offline
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  onClick={loadLogs}
+                  disabled={logLoading}
+                  variant="outline"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  {logLoading ? 'Actualizando...' : 'Actualizar'}
+                </Button>
+                <Button
+                  onClick={handleOpenLogsFolder}
+                  disabled={logLoading}
+                  variant="outline"
+                >
+                  <HardDrive className="h-4 w-4 mr-2" />
+                  Abrir carpeta de logs
+                </Button>
+                <Button
+                  onClick={handleExportLogs}
+                  disabled={logExporting}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  {logExporting ? 'Exportando...' : 'Exportar logs'}
+                </Button>
+              </div>
+              {logDir && (
+                <div className="text-sm text-muted-foreground">
+                  Ubicación: <span className="font-mono">{logDir}</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Últimos errores
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {recentErrors.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No hay errores recientes.</div>
+              ) : (
+                <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 max-h-64 overflow-auto whitespace-pre-wrap">
+                  {recentErrors.join('\n')}
+                </pre>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Últimos eventos
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {recentLogs.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No hay eventos recientes.</div>
+              ) : (
+                <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 max-h-64 overflow-auto whitespace-pre-wrap">
+                  {recentLogs.join('\n')}
+                </pre>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Archivos de logs
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {logFiles.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No hay archivos de logs.</div>
+              ) : (
+                <div className="space-y-3">
+                  {logFiles.map((file) => (
+                    <div key={file.name} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                      <div>
+                        <div className="font-medium text-gray-900">{file.name}</div>
+                        <div className="text-xs text-gray-500">
+                          {formatDate(file.updatedAt)} • {file.size}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>
@@ -1341,9 +1533,9 @@ Email: {EMAIL_TALLER}`
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="text-center p-4 bg-blue-50 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">{importacionStats.total}</div>
-                  <div className="text-sm text-blue-600">Total Repuestos</div>
+                <div className="text-center p-4 bg-red-50 rounded-lg">
+                  <div className="text-2xl font-bold text-red-600">{importacionStats.total}</div>
+                  <div className="text-sm text-red-600">Total Repuestos</div>
                 </div>
                 <div className="text-center p-4 bg-green-50 rounded-lg">
                   <div className="text-2xl font-bold text-green-600">{importacionStats.conStock}</div>
@@ -1400,7 +1592,7 @@ Email: {EMAIL_TALLER}`
                   <Button
                     onClick={importarInventarioPrincipal}
                     disabled={importando}
-                    className="w-full mt-3 bg-blue-600 hover:bg-blue-700"
+                    className="w-full mt-3 bg-red-600 hover:bg-red-700"
                   >
                     {importando ? 'Importando...' : 'Importar Inventario Principal'}
                   </Button>

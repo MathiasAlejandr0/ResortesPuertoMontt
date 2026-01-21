@@ -302,7 +302,7 @@ export default function PagosPage() {
         } else if (diffDias <= 2) {
           return <Badge className="bg-yellow-500 text-white">Próxima</Badge>;
         } else {
-          return <Badge className="bg-blue-500 text-white">Pendiente</Badge>;
+          return <Badge className="bg-red-500 text-white">Pendiente</Badge>;
         }
       default:
         return <Badge className="bg-gray-500 text-white">{estado}</Badge>;
@@ -655,7 +655,7 @@ export default function PagosPage() {
                   max={cuotaSeleccionada.monto - (cuotaSeleccionada.montoPagado || 0)}
                   value={montoPago}
                   onChange={(e) => setMontoPago(Number(e.target.value))}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
               </div>
               <div>
@@ -666,7 +666,7 @@ export default function PagosPage() {
                   type="date"
                   value={fechaPago}
                   onChange={(e) => setFechaPago(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
               </div>
               <div>
@@ -677,7 +677,7 @@ export default function PagosPage() {
                   value={observacionesPago}
                   onChange={(e) => setObservacionesPago(e.target.value)}
                   rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   placeholder="Notas adicionales sobre el pago..."
                 />
               </div>

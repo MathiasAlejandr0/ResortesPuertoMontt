@@ -1,8 +1,13 @@
-import * as sqlite3 from 'sqlite3';
+// Migrado a SQLCipher para encriptación AES-256-CBC (compliance OWASP, GDPR, ISO 27001)
+import * as sqlcipher from '@journeyapps/sqlcipher';
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 import { retryWithBackoff } from './retry-utils';
+import { EncryptionKeyService } from '../main/services/EncryptionKeyService';
+
+// Type alias para compatibilidad con código existente
+type Database = sqlcipher.Database;
 
 export interface Usuario {
   id?: number;
@@ -32,6 +37,7 @@ export interface Vehiculo {
   modelo: string;
   año: number;
   patente: string;
+  numeroChasis?: string;
   color?: string;
   kilometraje?: number;
   observaciones?: string;
@@ -93,6 +99,7 @@ export interface OrdenTrabajo {
   metodoPago?: 'Efectivo' | 'Débito' | 'Crédito';
   numeroCuotas?: number;
   fechaPago?: string;
+  fechaProgramada?: string;
 }
 
 export interface DetalleCotizacion {
@@ -155,6 +162,39 @@ export interface DetalleVenta {
   descripcion: string;
 }
 
+export interface MovimientoCaja {
+  id?: number;
+  tipo: 'ingreso' | 'egreso';
+  monto: number;
+  descripcion: string;
+  metodo_pago?: 'Efectivo' | 'Débito' | 'Crédito' | 'Transferencia';
+  fecha: string;
+  ordenId?: number;
+  caja_abierta?: boolean;
+}
+
+export interface EstadoCaja {
+  id?: number;
+  fecha_apertura: string;
+  fecha_cierre?: string;
+  monto_inicial: number;
+  monto_final?: number;
+  estado: 'abierta' | 'cerrada';
+  observaciones?: string;
+}
+
+export interface ComisionTecnico {
+  id?: number;
+  ordenId: number;
+  tecnicoId?: number;
+  tecnicoNombre: string;
+  monto_mano_obra: number;
+  porcentaje_comision: number;
+  monto_comision: number;
+  fecha_calculo: string;
+  mes_referencia: string;
+}
+
 // Caché LRU simple para queries frecuentes
 class QueryCache {
   private cache = new Map<string, { data: any; timestamp: number }>();
@@ -189,7 +229,17 @@ class QueryCache {
 }
 
 export class DatabaseService {
-  private db: sqlite3.Database;
+  private db: Database | null = null;
+  
+  // Type guard para verificar que db esté inicializado
+  private ensureDb(): Database {
+    if (!this.db) {
+      throw new Error('Base de datos no inicializada. Asegúrate de llamar a DatabaseService.create() primero.');
+    }
+    return this.db;
+  }
+  private encryptionKeyService: EncryptionKeyService;
+  private encryptionKey: Buffer | null = null;
   private lastBackupTime: number = 0;
   private backupInterval: number = 5 * 60 * 1000; // 5 minutos - evita generar demasiados backups durante trabajo activo
   private lastMaintenanceTime: number = 0;
@@ -198,30 +248,414 @@ export class DatabaseService {
   private isInitialized: boolean = false;
 
   private constructor() {
-    const paths = this.getPaths();
-    
-    // Crear directorio de datos si no existe
-    if (!fs.existsSync(paths.dataDir)) {
-      fs.mkdirSync(paths.dataDir, { recursive: true });
-    }
-    
-    this.db = new sqlite3.Database(paths.dbPath);
-    console.log('✅ DatabaseService: Base de datos creada');
+    // Inicializar servicio de gestión de claves
+    this.encryptionKeyService = new EncryptionKeyService();
   }
 
-  // Factory method asíncrono para inicialización
+  // Factory method asíncrono para inicialización con encriptación
   static async create(): Promise<DatabaseService> {
     const instance = new DatabaseService();
     await instance.initializeDatabaseAsync();
     instance.isInitialized = true;
     // Log solo en desarrollo
     if (!app.isPackaged) {
-      console.log('✅ DatabaseService: Base de datos inicializada');
+      console.log('✅ DatabaseService: Base de datos encriptada inicializada');
     }
     return instance;
   }
 
-  // Función para crear backup automático
+  /**
+   * Inicializa la base de datos con encriptación SQLCipher
+   * Incluye migración automática de bases de datos legacy (sin encriptar) a encriptadas
+   * 
+   * Flujo de Migración:
+   * 1. Detecta si existe resortes.db
+   * 2. Intenta abrirla con clave de encriptación
+   * 3. Si falla, intenta sin clave (legacy)
+   * 4. Si es legacy, migra datos usando ATTACH DATABASE y sqlcipher_export
+   * 5. Reemplazo atómico: backup legacy + renombrado seguro
+   */
+  private async initializeDatabaseAsync(): Promise<void> {
+    try {
+      // 1. Obtener o generar clave de encriptación
+      this.encryptionKey = await this.encryptionKeyService.getOrCreateEncryptionKey();
+      
+      if (!this.encryptionKeyService.validateKey(this.encryptionKey)) {
+        throw new Error('Clave de encriptación inválida. Debe tener 32 bytes (256 bits)');
+      }
+
+      const paths = this.getPaths();
+      const keyHex = this.encryptionKey.toString('hex');
+      
+      // Crear directorio de datos si no existe
+      if (!fs.existsSync(paths.dataDir)) {
+        fs.mkdirSync(paths.dataDir, { recursive: true });
+      }
+
+      // 2. Verificar si existe base de datos legacy (sin encriptar)
+      const dbExists = fs.existsSync(paths.dbPath);
+      let needsMigration = false;
+      let legacyDb: sqlcipher.Database | null = null;
+
+      if (!dbExists) {
+        console.log('📋 No existe base de datos. Se creará una nueva base de datos encriptada...');
+      } else {
+        console.log('📋 Detectada base de datos existente. Verificando si requiere migración...');
+        
+        // Intentar abrir con clave de encriptación
+        const testDb = new sqlcipher.Database(paths.dbPath);
+        const canOpenWithKey = await new Promise<boolean>((resolve) => {
+          testDb.serialize(() => {
+            testDb.run(`PRAGMA key = "x'${keyHex}'"`, (err: Error | null) => {
+              if (err) {
+                // No se puede abrir con clave, probablemente es legacy
+                testDb.close();
+                resolve(false);
+                return;
+              }
+              
+              // Verificar que realmente está encriptada y la clave es correcta
+              // Intentar leer de sqlite_master para confirmar que la clave es válida
+              testDb.get('SELECT name FROM sqlite_master WHERE type="table" LIMIT 1', (err2: Error | null, row: any) => {
+                testDb.close();
+                // Si no hay error y podemos leer, la clave es correcta
+                // Si hay error SQLITE_NOTADB, la clave no coincide
+                if (err2 && (err2 as any).code === 'SQLITE_NOTADB') {
+                  console.error('❌ La clave de encriptación no coincide con la base de datos existente');
+                  console.error('⚠️ Esto puede ocurrir si la clave fue regenerada pero la BD usa una clave anterior');
+                  resolve(false);
+                } else {
+                  resolve(!err2);
+                }
+              });
+            });
+          });
+        });
+
+        if (!canOpenWithKey) {
+          // Intentar abrir como legacy (sin encriptar)
+          console.log('🔄 Intentando abrir como base de datos legacy (sin encriptar)...');
+          legacyDb = new sqlcipher.Database(paths.dbPath);
+          const canOpenLegacy = await new Promise<boolean>((resolve) => {
+            legacyDb!.serialize(() => {
+              // Intentar leer sin clave (modo estándar SQLite)
+              legacyDb!.get('SELECT name FROM sqlite_master WHERE type="table" LIMIT 1', (err: Error | null) => {
+                if (!err) {
+                  // Es legacy, mantener la conexión abierta para la migración
+                  resolve(true);
+                } else {
+                  // No es legacy, probablemente la clave no coincide
+                  legacyDb!.close();
+                  legacyDb = null;
+                  console.error('❌ No se pudo abrir la base de datos con la clave actual ni como legacy');
+                  console.error('⚠️ La base de datos puede estar encriptada con una clave diferente');
+                  console.error('💡 Solución: Si tienes un backup, restáuralo. Si no, la base de datos debe ser recreada.');
+                  resolve(false);
+                }
+              });
+            });
+          });
+
+          if (canOpenLegacy && legacyDb) {
+            console.log('✅ Base de datos legacy detectada (sin encriptar). Iniciando migración...');
+            needsMigration = true;
+          } else {
+            if (legacyDb) {
+              legacyDb.close();
+              legacyDb = null;
+            }
+            // La base de datos existe pero no se puede abrir (clave incorrecta o corrupta)
+            // Eliminarla y crear una nueva
+            console.log('⚠️ La base de datos existe pero no se puede abrir (clave incorrecta o corrupta)');
+            console.log('🗑️  Eliminando base de datos problemática y creando una nueva...');
+            try {
+              const backupPath = paths.dbPath + '.corrupted-' + Date.now();
+              fs.renameSync(paths.dbPath, backupPath);
+              console.log(`✅ Base de datos problemática respaldada en: ${path.basename(backupPath)}`);
+              console.log('📋 Se creará una nueva base de datos encriptada...');
+            } catch (error) {
+              console.warn('⚠️ No se pudo respaldar la base de datos, eliminándola directamente...');
+              try {
+                fs.unlinkSync(paths.dbPath);
+                console.log('✅ Base de datos problemática eliminada');
+              } catch (unlinkError) {
+                console.error('❌ Error eliminando base de datos:', unlinkError);
+                throw new Error('No se pudo eliminar la base de datos problemática. Por favor, elimínala manualmente.');
+              }
+            }
+            // Continuar con la creación de una nueva base de datos
+          }
+        } else {
+          console.log('✅ Base de datos ya está encriptada y la clave coincide. Continuando con inicio normal...');
+        }
+      }
+
+      // 3. Migración de datos (si es necesario)
+      if (needsMigration && legacyDb) {
+        // Nota: migrateLegacyDatabase no usa realmente la conexión legacyDb,
+        // usa ATTACH DATABASE para adjuntar el archivo directamente
+        // Pero mantenemos la conexión abierta hasta que la migración esté completa
+        await this.migrateLegacyDatabase(legacyDb, paths, keyHex);
+        // Cerrar la conexión legacy después de la migración
+        if (legacyDb) {
+          try {
+            legacyDb.close();
+          } catch (closeErr) {
+            console.warn('⚠️ Error cerrando conexión legacy (no crítico):', closeErr);
+          }
+          legacyDb = null;
+        }
+      }
+
+      // 4. Crear/conectar a base de datos encriptada
+      this.db = new sqlcipher.Database(paths.dbPath);
+      
+      return new Promise((resolve, reject) => {
+        if (!this.db) {
+          reject(new Error('Base de datos no inicializada'));
+          return;
+        }
+
+        const db = this.ensureDb();
+      db.serialize(() => {
+          try {
+            // Configurar clave de encriptación (debe ser lo primero)
+            this.db!.run(`PRAGMA key = "x'${keyHex}'"`, (err: Error | null) => {
+              if (err) {
+                console.error('❌ Error configurando clave de encriptación:', err);
+                reject(new Error(`Error configurando encriptación: ${err.message}`));
+                return;
+              }
+
+              // Verificar que la encriptación está activa y la BD está lista
+              // Primero verificar versión de cipher - esto confirma que la clave es correcta
+              this.db!.get('PRAGMA cipher_version', (err: Error | null, row: any) => {
+                if (err) {
+                  console.error('❌ Error verificando versión de cipher:', err);
+                  console.error('⚠️ Esto puede indicar que la clave de encriptación no coincide con la BD');
+                  reject(new Error(`Error verificando encriptación: ${err.message}. La base de datos puede estar corrupta o usar una clave diferente. Si tienes un backup, restáuralo desde la configuración.`));
+                  return;
+                }
+
+                console.log('✅ SQLCipher activo:', row?.cipher_version || 'versión desconocida');
+                
+                // Hacer una consulta simple para verificar que la BD está accesible
+                this.db!.get('SELECT 1 as test', (err2: Error | null, row2: any) => {
+                  if (err2) {
+                    console.error('❌ Error verificando acceso a base de datos:', err2);
+                    const errorCode = (err2 as any).code;
+                    if (errorCode === 'SQLITE_NOTADB') {
+                      reject(new Error(`La clave de encriptación no coincide con la base de datos. Esto puede ocurrir si la clave fue regenerada. Si tienes un backup, restáuralo. Si no, necesitarás recrear la base de datos.`));
+                    } else {
+                      reject(new Error(`Error accediendo a base de datos: ${err2.message}`));
+                    }
+                    return;
+                  }
+
+                  // Hacer una consulta adicional para asegurar que la BD está completamente lista
+                  this.db!.get('SELECT name FROM sqlite_master WHERE type="table" LIMIT 1', (err3: Error | null, row3: any) => {
+                    if (err3) {
+                      console.error('❌ Error accediendo a sqlite_master:', err3);
+                      const errorCode = (err3 as any).code;
+                      if (errorCode === 'SQLITE_NOTADB') {
+                        reject(new Error(`La clave de encriptación no coincide con la base de datos. Esto puede ocurrir si la clave fue regenerada. Si tienes un backup, restáuralo. Si no, necesitarás recrear la base de datos.`));
+                      } else {
+                        console.error('⚠️ La base de datos puede estar corrupta');
+                        reject(new Error(`Error accediendo a estructura de BD: ${err3.message}`));
+                      }
+                      return;
+                    }
+
+                    console.log('✅ Base de datos verificada y lista para PRAGMAs');
+
+                    // Configurar algoritmo de encriptación a AES-256-CBC
+                    this.db!.run('PRAGMA cipher_default_kdf_iter = 256000', (err: Error | null) => {
+                    if (err) {
+                      console.warn('⚠️ No se pudo configurar iteraciones KDF:', err);
+                    }
+
+                    // Habilitar foreign keys para mantener integridad referencial
+                    this.db!.run('PRAGMA foreign_keys = ON', (err: Error | null) => {
+                      if (err) {
+                        console.warn('⚠️ No se pudo habilitar foreign keys:', err);
+                      }
+
+                      // SQLCipher puede tener problemas con WAL, usar DELETE en su lugar
+                      // WAL puede causar SQLITE_NOTADB en algunas configuraciones
+                      this.db!.run('PRAGMA journal_mode = DELETE', (err: Error | null) => {
+                        if (err) {
+                          console.warn('⚠️ No se pudo configurar journal_mode:', err);
+                        }
+                        
+                        // Configurar synchronous (NORMAL es más seguro que OFF)
+                        this.db!.run('PRAGMA synchronous = NORMAL', (err: Error | null) => {
+                          if (err) {
+                            console.warn('⚠️ No se pudo configurar synchronous:', err);
+                          }
+                          
+                          // Configurar cache_size
+                          this.db!.run('PRAGMA cache_size = -32000', (err: Error | null) => {
+                            if (err) {
+                              console.warn('⚠️ No se pudo configurar cache_size:', err);
+                            }
+                            
+                            // Configurar temp_store
+                            this.db!.run('PRAGMA temp_store = MEMORY', (err: Error | null) => {
+                              if (err) {
+                                console.warn('⚠️ No se pudo configurar temp_store:', err);
+                              }
+                              
+                              // Configurar busy_timeout
+                              this.db!.run('PRAGMA busy_timeout = 5000', (err: Error | null) => {
+                                if (err) {
+                                  console.warn('⚠️ No se pudo configurar busy_timeout:', err);
+                                }
+
+                                console.log('✅ Optimizaciones SQLCipher aplicadas');
+
+                                // Continuar con la creación de tablas
+                                // PRAGMA optimize se ejecutará después de crear las tablas
+                                this.createTables()
+                                  .then(() => {
+                                    // Ejecutar optimize después de crear las tablas
+                                    this.db!.run('PRAGMA optimize', (err: Error | null) => {
+                                      if (err) {
+                                        console.warn('⚠️ No se pudo ejecutar optimize:', err);
+                                      }
+                                      console.log('✅ Base de datos encriptada creada y configurada');
+                                      resolve();
+                                    });
+                                  })
+                                  .catch((tableError) => {
+                                    reject(tableError);
+                                  });
+                              });
+                            });
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+    } catch (error) {
+      console.error('❌ Error inicializando base de datos encriptada:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Migra una base de datos legacy (sin encriptar) a una encriptada
+   * Usa ATTACH DATABASE y sqlcipher_export para copiar todos los datos
+   */
+  private async migrateLegacyDatabase(
+    legacyDb: sqlcipher.Database,
+    paths: { dataDir: string; dbPath: string; backupDir: string },
+    keyHex: string
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const tempEncryptedPath = path.join(paths.dataDir, 'encrypted_temp.db');
+      const backupPath = paths.dbPath + '.backup_legacy';
+      
+      console.log('🔄 Paso 1: Creando base de datos temporal encriptada...');
+
+      // Crear nueva base de datos encriptada temporal
+      const encryptedDb = new sqlcipher.Database(tempEncryptedPath);
+      
+      encryptedDb.serialize(() => {
+        // Configurar clave de encriptación en la nueva BD
+        encryptedDb.run(`PRAGMA key = "x'${keyHex}'"`, (err: Error | null) => {
+          if (err) {
+            encryptedDb.close();
+            reject(new Error(`Error configurando encriptación en BD temporal: ${err.message}`));
+            return;
+          }
+
+          console.log('🔄 Paso 2: Adjuntando base de datos legacy...');
+
+          // Adjuntar base de datos legacy a la nueva encriptada
+          // Usar ruta absoluta para evitar problemas de path
+          const legacyPathAbsolute = path.resolve(paths.dbPath);
+          encryptedDb.run(`ATTACH DATABASE '${legacyPathAbsolute}' AS legacy`, (err: Error | null) => {
+            if (err) {
+              encryptedDb.close();
+              reject(new Error(`Error adjuntando base de datos legacy: ${err.message}`));
+              return;
+            }
+
+            console.log('🔄 Paso 3: Exportando datos de legacy a encriptada...');
+
+            // Exportar todos los datos usando sqlcipher_export
+            // Esto copia todas las tablas, índices, triggers, etc.
+            encryptedDb.run(`SELECT sqlcipher_export('legacy')`, (err: Error | null) => {
+              if (err) {
+                encryptedDb.run('DETACH DATABASE legacy', () => {});
+                encryptedDb.close();
+                reject(new Error(`Error exportando datos: ${err.message}`));
+                return;
+              }
+
+              console.log('🔄 Paso 4: Desadjuntando base de datos legacy...');
+
+              // Desadjuntar base de datos legacy
+              encryptedDb.run('DETACH DATABASE legacy', (err: Error | null) => {
+                if (err) {
+                  console.warn('⚠️ Error desadjuntando legacy (no crítico):', err);
+                }
+
+                encryptedDb.close((closeErr: Error | null) => {
+                  if (closeErr) {
+                    reject(new Error(`Error cerrando BD temporal: ${closeErr.message}`));
+                    return;
+                  }
+
+                  console.log('🔄 Paso 5: Realizando reemplazo atómico...');
+
+                  try {
+                    // Reemplazo atómico:
+                    // 1. Renombrar BD original a backup (por seguridad)
+                    if (fs.existsSync(paths.dbPath)) {
+                      fs.renameSync(paths.dbPath, backupPath);
+                      console.log(`✅ Backup legacy creado: ${backupPath}`);
+                    }
+
+                    // 2. Renombrar BD temporal encriptada a nombre final
+                    fs.renameSync(tempEncryptedPath, paths.dbPath);
+                    console.log('✅ Base de datos migrada exitosamente a formato encriptado');
+
+                    resolve();
+                  } catch (fsError: any) {
+                    // Si algo falla, intentar restaurar backup
+                    if (fs.existsSync(backupPath) && !fs.existsSync(paths.dbPath)) {
+                      try {
+                        fs.renameSync(backupPath, paths.dbPath);
+                        console.log('✅ Backup restaurado debido a error en migración');
+                      } catch (restoreError) {
+                        console.error('❌ Error crítico: No se pudo restaurar backup', restoreError);
+                      }
+                    }
+                    reject(new Error(`Error en reemplazo atómico: ${fsError.message}`));
+                  }
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  }
+
+  /**
+   * Función para crear backup automático
+   * Los backups también están encriptados (son copias de la BD encriptada)
+   */
   private async createAutoBackup(): Promise<void> {
     const now = Date.now();
     if (now - this.lastBackupTime < this.backupInterval) {
@@ -229,7 +663,6 @@ export class DatabaseService {
     }
 
     try {
-      const crypto = require('crypto');
       const paths = this.getPaths();
       
       // Crear directorio de backups si no existe
@@ -242,7 +675,8 @@ export class DatabaseService {
       const backupFileName = `auto-backup-${timestamp}.db`;
       const backupPath = path.join(paths.backupDir, backupFileName);
       
-      // Copiar la base de datos
+      // Copiar la base de datos (mantiene la encriptación)
+      if (fs.existsSync(paths.dbPath)) {
       fs.copyFileSync(paths.dbPath, backupPath);
       
       // Eliminar backups antiguos (mantener solo los últimos 5 automáticos para optimizar espacio)
@@ -264,31 +698,28 @@ export class DatabaseService {
       
       this.lastBackupTime = now;
       console.log('✅ DatabaseService: Backup automático creado:', backupFileName);
+      }
     } catch (error) {
       console.error('❌ DatabaseService: Error creando backup automático:', error);
     }
   }
 
-  private async initializeDatabaseAsync(): Promise<void> {
+  /**
+   * Crea todas las tablas de la base de datos
+   * Separado del método de inicialización para mejor organización
+   */
+  private async createTables(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.db.serialize(() => {
+      if (!this.db) {
+        reject(new Error('Base de datos no inicializada'));
+        return;
+      }
+
+      const db = this.ensureDb();
+      db.serialize(() => {
         try {
-          // Habilitar foreign keys para mantener integridad referencial
-          this.db.run('PRAGMA foreign_keys = ON');
-          
-          // Optimizaciones SQLite para mejor rendimiento
-          this.db.run('PRAGMA journal_mode = WAL');
-          this.db.run('PRAGMA synchronous = NORMAL');
-          this.db.run('PRAGMA cache_size = -32000'); // 32MB cache
-          this.db.run('PRAGMA temp_store = MEMORY'); // Temp en RAM
-          this.db.run('PRAGMA mmap_size = 268435456'); // 256MB mmap para lectura
-          this.db.run('PRAGMA busy_timeout = 5000'); // Timeout 5s para locks
-          this.db.run('PRAGMA optimize'); // Análisis automático de queries
-          
-          console.log('✅ Optimizaciones SQLite aplicadas');
-          
       // Tabla de usuarios (sistema de autenticación)
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS usuarios (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           nombre TEXT NOT NULL,
@@ -301,7 +732,7 @@ export class DatabaseService {
       `);
 
       // Tabla de clientes
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS clientes (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           nombre TEXT NOT NULL,
@@ -315,7 +746,7 @@ export class DatabaseService {
       `);
 
       // Tabla de vehículos (con color y kilometraje como en el original)
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS vehiculos (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           clienteId INTEGER NOT NULL,
@@ -323,6 +754,7 @@ export class DatabaseService {
           modelo TEXT NOT NULL,
           año INTEGER NOT NULL CHECK (año >= 1900 AND año <= 2030),
           patente TEXT NOT NULL UNIQUE,
+          numeroChasis TEXT,
           color TEXT,
           kilometraje INTEGER CHECK (kilometraje >= 0),
           observaciones TEXT,
@@ -332,7 +764,7 @@ export class DatabaseService {
       `);
 
       // Tabla de servicios
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS servicios (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           nombre TEXT NOT NULL UNIQUE,
@@ -344,7 +776,7 @@ export class DatabaseService {
       `);
 
       // Tabla de repuestos
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS repuestos (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           codigo TEXT NOT NULL UNIQUE,
@@ -362,7 +794,7 @@ export class DatabaseService {
       `);
       
       // Agregar columna precioCosto si no existe (para bases de datos existentes)
-      this.db.run(`
+          this.db!.run(`
         ALTER TABLE repuestos ADD COLUMN precioCosto INTEGER DEFAULT 0 CHECK (precioCosto >= 0)
       `, (err: any) => {
         // Ignorar error si la columna ya existe
@@ -371,8 +803,18 @@ export class DatabaseService {
         }
       });
 
+      // Agregar columna numeroChasis si no existe (para bases de datos existentes)
+          this.db!.run(`
+        ALTER TABLE vehiculos ADD COLUMN numeroChasis TEXT
+      `, (err: any) => {
+        // Ignorar error si la columna ya existe
+        if (err && !err.message.includes('duplicate column')) {
+          console.warn('⚠️ Error agregando columna numeroChasis:', err.message);
+        }
+      });
+
       // Tabla de cotizaciones
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS cotizaciones (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           numero TEXT NOT NULL UNIQUE,
@@ -390,7 +832,7 @@ export class DatabaseService {
       `);
 
       // Tabla de órdenes de trabajo
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS ordenes_trabajo (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           numero TEXT NOT NULL UNIQUE,
@@ -415,7 +857,7 @@ export class DatabaseService {
       `);
 
       // Tabla de ventas (ventas rápidas de repuestos sin mano de obra)
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS ventas (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           numero TEXT NOT NULL UNIQUE,
@@ -433,7 +875,7 @@ export class DatabaseService {
       `);
 
       // Tabla de detalles de venta
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS detalles_venta (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           ventaId INTEGER NOT NULL,
@@ -449,7 +891,7 @@ export class DatabaseService {
       
       // Agregar columnas de pago si no existen (migración)
       // SQLite no soporta CHECK constraints en ALTER TABLE, así que agregamos sin constraint
-      this.db.run(`
+          this.db!.run(`
         ALTER TABLE ordenes_trabajo ADD COLUMN metodoPago TEXT
       `, (err: any) => {
         // Ignorar error si la columna ya existe
@@ -458,7 +900,7 @@ export class DatabaseService {
         }
       });
       
-      this.db.run(`
+          this.db!.run(`
         ALTER TABLE ordenes_trabajo ADD COLUMN numeroCuotas INTEGER
       `, (err: any) => {
         // Ignorar error si la columna ya existe
@@ -467,7 +909,7 @@ export class DatabaseService {
         }
       });
       
-      this.db.run(`
+          this.db!.run(`
         ALTER TABLE ordenes_trabajo ADD COLUMN fechaPago DATETIME
       `, (err: any) => {
         // Ignorar error si la columna ya existe
@@ -477,7 +919,7 @@ export class DatabaseService {
       });
 
       // Tabla de cuotas de pago (para órdenes con crédito)
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS cuotas_pago (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           ordenId INTEGER NOT NULL,
@@ -494,7 +936,7 @@ export class DatabaseService {
       `);
 
       // Tabla de detalles de cotización
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS detalles_cotizacion (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           cotizacionId INTEGER NOT NULL,
@@ -514,7 +956,7 @@ export class DatabaseService {
       `);
 
       // Tabla de detalles de orden de trabajo
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS detalles_orden (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           ordenId INTEGER NOT NULL,
@@ -534,7 +976,7 @@ export class DatabaseService {
       `);
 
       // Tabla de configuración
-      this.db.run(`
+          this.db!.run(`
         CREATE TABLE IF NOT EXISTS configuracion (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           clave TEXT NOT NULL UNIQUE,
@@ -544,10 +986,73 @@ export class DatabaseService {
       `);
       
       // Inicializar versión del esquema si no existe (después de crear la tabla)
-      this.db.run(`
+          this.db!.run(`
         INSERT OR IGNORE INTO configuracion (clave, valor, descripcion)
-        VALUES ('schema_version', '1.1.2', 'Versión del esquema de base de datos')
+        VALUES ('schema_version', '1.2.0', 'Versión del esquema de base de datos')
       `);
+
+      // Tabla de movimientos de caja
+          this.db!.run(`
+        CREATE TABLE IF NOT EXISTS movimientos_caja (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tipo TEXT NOT NULL CHECK (tipo IN ('ingreso', 'egreso')),
+          monto INTEGER NOT NULL CHECK (monto >= 0),
+          descripcion TEXT NOT NULL,
+          metodo_pago TEXT CHECK (metodo_pago IN ('Efectivo', 'Débito', 'Crédito', 'Transferencia')),
+          fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          ordenId INTEGER,
+          caja_abierta BOOLEAN DEFAULT 1,
+          FOREIGN KEY (ordenId) REFERENCES ordenes_trabajo(id) ON DELETE SET NULL
+        )
+      `);
+
+      // Tabla de estado de caja
+          this.db!.run(`
+        CREATE TABLE IF NOT EXISTS estado_caja (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          fecha_apertura DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          fecha_cierre DATETIME,
+          monto_inicial INTEGER NOT NULL DEFAULT 0 CHECK (monto_inicial >= 0),
+          monto_final INTEGER CHECK (monto_final >= 0),
+          estado TEXT NOT NULL DEFAULT 'abierta' CHECK (estado IN ('abierta', 'cerrada')),
+          observaciones TEXT
+        )
+      `);
+
+      // Tabla de comisiones de técnicos
+          this.db!.run(`
+        CREATE TABLE IF NOT EXISTS comisiones_tecnicos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ordenId INTEGER NOT NULL,
+          tecnicoId INTEGER,
+          tecnicoNombre TEXT NOT NULL,
+          monto_mano_obra INTEGER NOT NULL CHECK (monto_mano_obra >= 0),
+          porcentaje_comision REAL NOT NULL CHECK (porcentaje_comision >= 0 AND porcentaje_comision <= 100),
+          monto_comision INTEGER NOT NULL CHECK (monto_comision >= 0),
+          fecha_calculo DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          mes_referencia TEXT NOT NULL,
+          FOREIGN KEY (ordenId) REFERENCES ordenes_trabajo(id) ON DELETE CASCADE,
+          FOREIGN KEY (tecnicoId) REFERENCES usuarios(id) ON DELETE SET NULL
+        )
+      `);
+
+      // Agregar columnas a tablas existentes (migración)
+          this.db!.run(`
+        ALTER TABLE usuarios ADD COLUMN porcentaje_comision REAL DEFAULT 0 CHECK (porcentaje_comision >= 0 AND porcentaje_comision <= 100)
+      `, (err: any) => {
+        // Ignorar error si la columna ya existe
+        if (err && !err.message.includes('duplicate column')) {
+          console.warn('Advertencia al agregar columna porcentaje_comision:', err.message);
+        }
+      });
+
+          this.db!.run(`
+        ALTER TABLE ordenes_trabajo ADD COLUMN fechaProgramada DATETIME
+      `, (err: any) => {
+        if (err && !err.message.includes('duplicate column')) {
+          console.warn('Advertencia al agregar columna fechaProgramada:', err.message);
+        }
+      });
 
           // Crear índices para mejorar rendimiento
           this.createIndexes();
@@ -600,45 +1105,56 @@ export class DatabaseService {
   }
 
   private createIndexes(): void {
+    const db = this.ensureDb();
     // Índices para búsquedas frecuentes
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_clientes_rut ON clientes(rut)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_clientes_email ON clientes(email)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_vehiculos_cliente ON vehiculos(clienteId)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_vehiculos_patente ON vehiculos(patente)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_cliente ON cotizaciones(clienteId)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_fecha ON cotizaciones(fecha)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_estado ON cotizaciones(estado)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_cliente ON ordenes_trabajo(clienteId)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_fecha ON ordenes_trabajo(fechaIngreso)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_estado ON ordenes_trabajo(estado)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_repuestos_codigo ON repuestos(codigo)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_repuestos_categoria ON repuestos(categoria)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_repuestos_nombre ON repuestos(nombre)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_servicios_nombre ON servicios(nombre)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_clientes_rut ON clientes(rut)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_clientes_email ON clientes(email)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_vehiculos_cliente ON vehiculos(clienteId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_vehiculos_patente ON vehiculos(patente)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_cliente ON cotizaciones(clienteId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_fecha ON cotizaciones(fecha)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_estado ON cotizaciones(estado)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_cliente ON ordenes_trabajo(clienteId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_fecha ON ordenes_trabajo(fechaIngreso)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_estado ON ordenes_trabajo(estado)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_repuestos_codigo ON repuestos(codigo)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_repuestos_categoria ON repuestos(categoria)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_repuestos_nombre ON repuestos(nombre)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_servicios_nombre ON servicios(nombre)');
     
     // Índices para tablas de detalles (mejoran JOINs y búsquedas)
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_detalles_cotizacion_cotizacion ON detalles_cotizacion(cotizacionId)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_detalles_orden_orden ON detalles_orden(ordenId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_detalles_cotizacion_cotizacion ON detalles_cotizacion(cotizacionId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_detalles_orden_orden ON detalles_orden(ordenId)');
     
     // Índices compuestos para búsquedas frecuentes (mejoras de rendimiento)
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_cliente_fecha ON ordenes_trabajo(clienteId, fechaIngreso)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_cuotas_orden_estado ON cuotas_pago(ordenId, estado)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_cliente_fecha ON cotizaciones(clienteId, fecha)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_cliente_fecha ON ordenes_trabajo(clienteId, fechaIngreso)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_cuotas_orden_estado ON cuotas_pago(ordenId, estado)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_cliente_fecha ON cotizaciones(clienteId, fecha)');
     
     // Índices adicionales para búsquedas de texto
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_numero ON ordenes_trabajo(numero)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_numero ON cotizaciones(numero)');
-    this.db.run('CREATE INDEX IF NOT EXISTS idx_cuotas_fecha_vencimiento ON cuotas_pago(fechaVencimiento)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_numero ON ordenes_trabajo(numero)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_cotizaciones_numero ON cotizaciones(numero)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_cuotas_fecha_vencimiento ON cuotas_pago(fechaVencimiento)');
+    
+    // Índices para nuevos módulos
+    db.run('CREATE INDEX IF NOT EXISTS idx_movimientos_caja_fecha ON movimientos_caja(fecha)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_movimientos_caja_tipo ON movimientos_caja(tipo)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_estado_caja_fecha ON estado_caja(fecha_apertura)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_orden ON comisiones_tecnicos(ordenId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_tecnico ON comisiones_tecnicos(tecnicoId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_mes ON comisiones_tecnicos(mes_referencia)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_fecha_programada ON ordenes_trabajo(fechaProgramada)');
     
     console.log('✅ Índices de base de datos creados');
   }
 
   private createFullTextIndexes(): void {
     try {
+      const db = this.ensureDb();
       // Crear tablas virtuales FULLTEXT para búsquedas rápidas en texto
       // Clientes FTS5
-      this.db.run(`
+      db.run(`
         CREATE VIRTUAL TABLE IF NOT EXISTS clientes_fts USING fts5(
           nombre, email, telefono,
           content='clientes',
@@ -647,7 +1163,7 @@ export class DatabaseService {
       `);
 
       // Repuestos FTS5
-      this.db.run(`
+      db.run(`
         CREATE VIRTUAL TABLE IF NOT EXISTS repuestos_fts USING fts5(
           nombre, codigo, descripcion, categoria,
           content='repuestos',
@@ -656,14 +1172,14 @@ export class DatabaseService {
       `);
 
       // Triggers para mantener sincronizado
-      this.db.run(`
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS clientes_fts_insert AFTER INSERT ON clientes BEGIN
           INSERT INTO clientes_fts(rowid, nombre, email, telefono)
           VALUES (new.id, new.nombre, COALESCE(new.email, ''), new.telefono);
         END
       `);
 
-      this.db.run(`
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS clientes_fts_update AFTER UPDATE ON clientes BEGIN
           UPDATE clientes_fts SET
             nombre = new.nombre,
@@ -673,20 +1189,20 @@ export class DatabaseService {
         END
       `);
 
-      this.db.run(`
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS clientes_fts_delete AFTER DELETE ON clientes BEGIN
           DELETE FROM clientes_fts WHERE rowid = old.id;
         END
       `);
 
-      this.db.run(`
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS repuestos_fts_insert AFTER INSERT ON repuestos BEGIN
           INSERT INTO repuestos_fts(rowid, nombre, codigo, descripcion, categoria)
           VALUES (new.id, new.nombre, new.codigo, new.descripcion, new.categoria);
         END
       `);
 
-      this.db.run(`
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS repuestos_fts_update AFTER UPDATE ON repuestos BEGIN
           UPDATE repuestos_fts SET
             nombre = new.nombre,
@@ -697,7 +1213,7 @@ export class DatabaseService {
         END
       `);
 
-      this.db.run(`
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS repuestos_fts_delete AFTER DELETE ON repuestos BEGIN
           DELETE FROM repuestos_fts WHERE rowid = old.id;
         END
@@ -705,13 +1221,13 @@ export class DatabaseService {
 
       // Poblar índices FTS con datos existentes (solo si hay datos)
       // Evitar duplicados usando INSERT OR IGNORE
-      this.db.run(`
+      db.run(`
         INSERT OR IGNORE INTO clientes_fts(rowid, nombre, email, telefono)
         SELECT id, nombre, COALESCE(email, ''), telefono FROM clientes
         WHERE id NOT IN (SELECT rowid FROM clientes_fts)
       `);
 
-      this.db.run(`
+      db.run(`
         INSERT OR IGNORE INTO repuestos_fts(rowid, nombre, codigo, descripcion, categoria)
         SELECT id, nombre, codigo, descripcion, categoria FROM repuestos
         WHERE id NOT IN (SELECT rowid FROM repuestos_fts)
@@ -728,10 +1244,10 @@ export class DatabaseService {
    * Verifica y migra el esquema de la base de datos si es necesario
    */
   private checkAndMigrateSchema(): void {
-    const CURRENT_SCHEMA_VERSION = '1.1.2'; // Versión actual del esquema
+    const CURRENT_SCHEMA_VERSION = '1.2.0'; // Versión actual del esquema
     
     // Verificar si existe la tabla de configuración (para almacenar versión)
-    this.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='configuracion'", (err, row: any) => {
+    this.ensureDb().get("SELECT name FROM sqlite_master WHERE type='table' AND name='configuracion'", (err, row: any) => {
       if (err) {
         console.error('Error verificando tabla configuracion:', err);
         return;
@@ -744,7 +1260,8 @@ export class DatabaseService {
       }
       
       // Verificar versión actual del esquema
-      this.db.get("SELECT valor FROM configuracion WHERE clave = 'schema_version'", async (err, versionRow: any) => {
+      const dbInner = this.ensureDb();
+      dbInner.get("SELECT valor FROM configuracion WHERE clave = 'schema_version'", async (err: Error | null, versionRow: any) => {
         if (err) {
           console.error('Error verificando versión del esquema:', err);
           return;
@@ -770,15 +1287,16 @@ export class DatabaseService {
     this.cleanAllDuplicates();
     
     // Importar y usar el servicio de migraciones
+    const db = this.ensureDb();
     try {
       const { MigrationService } = await import('./migrations');
       const migrationService = new MigrationService();
-      await migrationService.migrate(this.db, toVersion);
+      await migrationService.migrate(db, toVersion);
       console.log(`✅ Esquema migrado a versión ${toVersion}`);
     } catch (error) {
       console.error('Error en migración:', error);
       // Fallback: actualizar versión manualmente
-      this.db.run(`
+      db.run(`
         INSERT OR REPLACE INTO configuracion (clave, valor, descripcion)
         VALUES ('schema_version', ?, 'Versión del esquema de base de datos')
       `, [toVersion], (err) => {
@@ -796,11 +1314,12 @@ export class DatabaseService {
    */
   private cleanAllDuplicates(): void {
     console.log('🧹 Limpiando duplicados de todas las tablas...');
+    const db = this.ensureDb();
     
     // Usar transacción para evitar SQLITE_BUSY
-    this.db.serialize(() => {
+    db.serialize(() => {
       // Limpiar duplicados de clientes (por RUT único)
-      this.db.run(`
+      db.run(`
         DELETE FROM clientes 
         WHERE id NOT IN (
           SELECT MIN(id) FROM clientes GROUP BY rut
@@ -814,7 +1333,7 @@ export class DatabaseService {
       });
     
       // Limpiar duplicados de vehículos (por patente única)
-      this.db.run(`
+      db.run(`
         DELETE FROM vehiculos 
         WHERE id NOT IN (
           SELECT MIN(id) FROM vehiculos GROUP BY patente
@@ -828,7 +1347,7 @@ export class DatabaseService {
       });
       
       // Limpiar duplicados de cotizaciones (por número único)
-      this.db.run(`
+      db.run(`
         DELETE FROM cotizaciones 
         WHERE id NOT IN (
           SELECT MIN(id) FROM cotizaciones GROUP BY numero
@@ -842,7 +1361,7 @@ export class DatabaseService {
       });
       
       // Limpiar duplicados de órdenes (por número único)
-      this.db.run(`
+      db.run(`
         DELETE FROM ordenes_trabajo 
         WHERE id NOT IN (
           SELECT MIN(id) FROM ordenes_trabajo GROUP BY numero
@@ -856,7 +1375,7 @@ export class DatabaseService {
       });
       
       // Limpiar duplicados de repuestos (por código único)
-      this.db.run(`
+      db.run(`
         DELETE FROM repuestos 
         WHERE id NOT IN (
           SELECT MIN(id) FROM repuestos GROUP BY codigo
@@ -870,7 +1389,7 @@ export class DatabaseService {
       });
       
       // Limpiar duplicados de servicios (por nombre único)
-      this.db.run(`
+      db.run(`
         DELETE FROM servicios 
         WHERE id NOT IN (
           SELECT MIN(id) FROM servicios GROUP BY nombre
@@ -884,7 +1403,7 @@ export class DatabaseService {
       });
       
       // Limpiar detalles huérfanos (sin relación válida)
-      this.db.run(`
+      db.run(`
         DELETE FROM detalles_cotizacion 
         WHERE cotizacionId NOT IN (SELECT id FROM cotizaciones)
       `, (err: any) => {
@@ -895,7 +1414,7 @@ export class DatabaseService {
         }
       });
       
-      this.db.run(`
+      db.run(`
         DELETE FROM detalles_orden 
         WHERE ordenId NOT IN (SELECT id FROM ordenes_trabajo)
       `, (err: any) => {
@@ -907,7 +1426,7 @@ export class DatabaseService {
       });
       
       // Limpiar vehículos huérfanos (sin cliente válido)
-      this.db.run(`
+      db.run(`
         DELETE FROM vehiculos 
         WHERE clienteId NOT IN (SELECT id FROM clientes)
       `, (err: any) => {
@@ -922,7 +1441,8 @@ export class DatabaseService {
 
   private cleanDuplicatesOnInit(): void {
     // Verificar si hay datos existentes antes de limpiar
-    this.db.get('SELECT COUNT(*) as count FROM clientes', (err, row: any) => {
+    const db = this.ensureDb();
+    db.get('SELECT COUNT(*) as count FROM clientes', (err, row: any) => {
       if (err) {
         console.error('Error verificando datos existentes:', err);
         return;
@@ -942,7 +1462,7 @@ export class DatabaseService {
 
   private insertInitialData(): void {
     // Verificar si ya existen datos iniciales específicos para evitar duplicados
-    this.db.get('SELECT COUNT(*) as count FROM clientes WHERE nombre IN ("Juan Pérez", "María González", "Carlos Mendoza", "Ana Torres", "Pedro Silva")', (err, row: any) => {
+    this.ensureDb().get('SELECT COUNT(*) as count FROM clientes WHERE nombre IN ("Juan Pérez", "María González", "Carlos Mendoza", "Ana Torres", "Pedro Silva")', (err, row: any) => {
       if (err) {
         console.error('Error verificando datos iniciales:', err);
         return;
@@ -951,13 +1471,13 @@ export class DatabaseService {
       // Si ya existen los 5 clientes específicos, verificar si hay datos completos
       if (row.count >= 5) {
         // Verificar si hay vehículos y cotizaciones
-        this.db.get('SELECT COUNT(*) as vehiculos FROM vehiculos', (err, vehiculosRow: any) => {
+        this.ensureDb().get('SELECT COUNT(*) as vehiculos FROM vehiculos', (err, vehiculosRow: any) => {
           if (err) {
             console.error('Error verificando vehículos:', err);
             return;
           }
           
-          this.db.get('SELECT COUNT(*) as cotizaciones FROM cotizaciones', (err, cotizacionesRow: any) => {
+          this.ensureDb().get('SELECT COUNT(*) as cotizaciones FROM cotizaciones', (err, cotizacionesRow: any) => {
             if (err) {
               console.error('Error verificando cotizaciones:', err);
               return;
@@ -988,7 +1508,7 @@ export class DatabaseService {
       }
 
       // Si hay datos pero no son los iniciales, limpiar duplicados primero
-      this.db.get('SELECT COUNT(*) as total FROM clientes', (err, totalRow: any) => {
+      this.ensureDb().get('SELECT COUNT(*) as total FROM clientes', (err, totalRow: any) => {
         if (err) {
           console.error('Error verificando total de clientes:', err);
           return;
@@ -996,7 +1516,7 @@ export class DatabaseService {
 
         if (totalRow.total > 0) {
           console.log('🧹 Limpiando duplicados existentes...');
-          this.db.run('DELETE FROM clientes WHERE id NOT IN (SELECT MIN(id) FROM clientes GROUP BY rut)', (err) => {
+          this.ensureDb().run('DELETE FROM clientes WHERE id NOT IN (SELECT MIN(id) FROM clientes GROUP BY rut)', (err) => {
             if (err) {
               console.error('Error limpiando duplicados:', err);
             } else {
@@ -1007,29 +1527,30 @@ export class DatabaseService {
 
         // Primero limpiar completamente todos los datos existentes
         console.log('🧹 Limpiando base de datos...');
-        this.db.run(`DELETE FROM detalles_orden`);
-        this.db.run(`DELETE FROM detalles_cotizacion`);
-        this.db.run(`DELETE FROM ordenes_trabajo`);
-        this.db.run(`DELETE FROM cotizaciones`);
-        this.db.run(`DELETE FROM vehiculos`);
-        this.db.run(`DELETE FROM clientes`);
-        this.db.run(`DELETE FROM repuestos`);
-        this.db.run(`DELETE FROM servicios`);
-        this.db.run(`DELETE FROM usuarios`);
+        const db = this.ensureDb();
+        db.run(`DELETE FROM detalles_orden`);
+        db.run(`DELETE FROM detalles_cotizacion`);
+        db.run(`DELETE FROM ordenes_trabajo`);
+        db.run(`DELETE FROM cotizaciones`);
+        db.run(`DELETE FROM vehiculos`);
+        db.run(`DELETE FROM clientes`);
+        db.run(`DELETE FROM repuestos`);
+        db.run(`DELETE FROM servicios`);
+        db.run(`DELETE FROM usuarios`);
 
         // Resetear los contadores de ID
-        this.db.run(`DELETE FROM sqlite_sequence WHERE name IN ('usuarios', 'servicios', 'repuestos', 'clientes', 'vehiculos', 'cotizaciones', 'ordenes_trabajo', 'detalles_cotizacion', 'detalles_orden')`);
+        db.run(`DELETE FROM sqlite_sequence WHERE name IN ('usuarios', 'servicios', 'repuestos', 'clientes', 'vehiculos', 'cotizaciones', 'ordenes_trabajo', 'detalles_cotizacion', 'detalles_orden')`);
 
         console.log('✅ Base de datos limpiada completamente');
 
         // Insertar usuario administrador
-        this.db.run(`
+        db.run(`
           INSERT INTO usuarios (nombre, email, password, rol, activo) 
           VALUES ('Administrador', 'admin@resortespm.cl', 'admin123', 'admin', 1)
         `);
 
         // Insertar servicios predefinidos (5 únicos)
-        this.db.run(`
+        db.run(`
           INSERT OR IGNORE INTO servicios (nombre, descripcion, precio, duracionEstimada, activo) 
           VALUES 
             ('Frenos', 'Revisión y reparación de sistema de frenos', 35000, 90, 1),
@@ -1040,7 +1561,7 @@ export class DatabaseService {
         `);
 
         // Insertar datos iniciales de repuestos (5 únicos)
-        this.db.run(`
+        db.run(`
           INSERT OR IGNORE INTO repuestos (codigo, nombre, descripcion, precio, precioCosto, stock, stockMinimo, categoria, marca, ubicacion, activo) 
           VALUES 
             ('ACE001', 'Aceite Motor 5W30', 'Aceite sintético para motor', 25000, 20000, 20, 5, 'Motor', 'Castrol', 'Estante A1', 1),
@@ -1051,7 +1572,7 @@ export class DatabaseService {
         `);
 
         // Insertar datos iniciales de clientes (5 únicos)
-        this.db.run(`
+        db.run(`
           INSERT OR IGNORE INTO clientes (nombre, rut, email, telefono, direccion, activo) 
           VALUES 
             ('Juan Pérez', '12.345.678-9', 'juan.perez@email.com', '+56912345678', 'Av. Principal 123, Puerto Montt', 1),
@@ -1062,7 +1583,7 @@ export class DatabaseService {
         `);
 
         // Insertar datos iniciales de vehículos (5 únicos, uno por cliente)
-        this.db.run(`
+        db.run(`
           INSERT OR IGNORE INTO vehiculos (clienteId, marca, modelo, año, patente, color, kilometraje, activo) 
           VALUES 
             (1, 'Toyota', 'Corolla', 2020, 'ABC123', 'Blanco', 45000, 1),
@@ -1073,7 +1594,7 @@ export class DatabaseService {
         `);
 
         // Insertar datos iniciales de cotizaciones (5 únicos)
-        this.db.run(`
+        db.run(`
           INSERT INTO cotizaciones (numero, clienteId, vehiculoId, fecha, validaHasta, estado, descripcion, observaciones, total) 
           VALUES 
             ('COT-2025-001', 1, 1, '${new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}', '${new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}', 'Pendiente', 'Revisión general del vehículo', 'Cliente solicita cotización para mantenimiento preventivo', 85000),
@@ -1084,7 +1605,7 @@ export class DatabaseService {
         `);
 
         // Insertar datos iniciales de órdenes de trabajo (5 únicos)
-        this.db.run(`
+        db.run(`
           INSERT OR IGNORE INTO ordenes_trabajo (numero, clienteId, vehiculoId, fechaIngreso, fechaEntrega, estado, descripcion, observaciones, total, kilometrajeEntrada, prioridad, tecnicoAsignado) 
           VALUES 
             ('ORD-2025-001', 1, 1, '${new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}', '${new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}', 'En Progreso', 'Revisión general del vehículo', 'Cliente solicita mantenimiento preventivo', 85000, 45000, 'Normal', 'Carlos Mendoza'),
@@ -1095,7 +1616,7 @@ export class DatabaseService {
         `);
 
         // Insertar detalles de cotizaciones
-        this.db.run(`
+        db.run(`
           INSERT INTO detalles_cotizacion (cotizacionId, tipo, servicioId, repuestoId, cantidad, precio, subtotal, descripcion) 
           VALUES 
             (1, 'servicio', 3, NULL, 1, 25000, 25000, 'Revisión General'),
@@ -1120,7 +1641,7 @@ export class DatabaseService {
         `);
 
         // Insertar datos iniciales de órdenes de trabajo
-        this.db.run(`
+        db.run(`
           INSERT OR IGNORE INTO ordenes_trabajo (numero, clienteId, vehiculoId, fechaIngreso, fechaEntrega, estado, descripcion, observaciones, total, kilometrajeEntrada, kilometrajeSalida, prioridad, tecnicoAsignado) 
           VALUES 
             ('OT-2025-001', 1, 1, '${new Date().toISOString().split('T')[0]}', '${new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}', 'Completada', 'Revisión general y mantenimiento', 'Vehículo en buen estado general', 85000, 45000, 45000, 'Media', 'Carlos Mendoza'),
@@ -1131,7 +1652,8 @@ export class DatabaseService {
         `);
 
         // Insertar detalles de órdenes de trabajo
-        this.db.run(`
+        const dbDetalles = this.ensureDb();
+        dbDetalles.run(`
           INSERT INTO detalles_orden (ordenId, tipo, servicioId, repuestoId, cantidad, precio, subtotal, descripcion) 
           VALUES 
             (1, 'servicio', 3, NULL, 1, 25000, 25000, 'Revisión General'),
@@ -1163,7 +1685,7 @@ export class DatabaseService {
   // Métodos para usuarios
   async getAllUsuarios(): Promise<Usuario[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM usuarios ORDER BY nombre', (err, rows) => {
+      this.ensureDb().all('SELECT * FROM usuarios ORDER BY nombre', (err, rows) => {
         if (err) reject(err);
         else resolve(rows as Usuario[]);
       });
@@ -1175,7 +1697,7 @@ export class DatabaseService {
     const usuarioToSave = { ...usuario, id };
 
     return new Promise((resolve, reject) => {
-      this.db.run(
+      this.ensureDb().run(
         `INSERT OR REPLACE INTO usuarios (id, nombre, email, password, rol, activo, fechaCreacion)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [id, usuarioToSave.nombre, usuarioToSave.email, usuarioToSave.password, 
@@ -1198,7 +1720,7 @@ export class DatabaseService {
 
     return retryWithBackoff(() => {
       return new Promise<Cliente[]>((resolve, reject) => {
-        this.db.all('SELECT * FROM clientes ORDER BY nombre', (err, rows) => {
+        this.ensureDb().all('SELECT * FROM clientes ORDER BY nombre', (err, rows) => {
           if (err) reject(err);
           else {
             // Eliminar duplicados por ID antes de devolver
@@ -1226,7 +1748,7 @@ export class DatabaseService {
 
     return new Promise((resolve, reject) => {
       // Obtener total primero
-      this.db.get('SELECT COUNT(*) as total FROM clientes', (err: any, countRow: any) => {
+      this.ensureDb().get('SELECT COUNT(*) as total FROM clientes', (err: any, countRow: any) => {
         if (err) {
           reject(err);
           return;
@@ -1234,7 +1756,7 @@ export class DatabaseService {
         const total = countRow?.total || 0;
 
         // Obtener datos paginados
-        this.db.all(
+        this.ensureDb().all(
           'SELECT * FROM clientes ORDER BY nombre LIMIT ? OFFSET ?',
           [limit, offset],
           (err: any, rows: any[]) => {
@@ -1263,7 +1785,7 @@ export class DatabaseService {
 
     return new Promise((resolve, reject) => {
       // Usar índice FULLTEXT si está disponible
-      this.db.all(
+      this.ensureDb().all(
         `SELECT c.* FROM clientes c
          JOIN clientes_fts fts ON c.id = fts.rowid
          WHERE clientes_fts MATCH ?
@@ -1273,7 +1795,7 @@ export class DatabaseService {
           if (err) {
             // Fallback a búsqueda normal si FTS falla
             const searchLower = searchTerm.toLowerCase();
-            this.db.all(
+            this.ensureDb().all(
               'SELECT * FROM clientes WHERE nombre LIKE ? OR email LIKE ? OR telefono LIKE ? ORDER BY nombre',
               [`%${searchLower}%`, `%${searchLower}%`, `%${searchTerm}%`],
               (err2: any, rows2: any[]) => {
@@ -1301,10 +1823,11 @@ export class DatabaseService {
   async saveCliente(cliente: Cliente): Promise<Cliente> {
     const id = cliente.id || Date.now();
     const clienteToSave = { ...cliente, id };
+    const db = this.ensureDb();
 
     return new Promise((resolve, reject) => {
       // Primero verificar si ya existe un cliente con el mismo RUT o email
-      this.db.get(
+      db.get(
         `SELECT id FROM clientes WHERE (rut = ? OR email = ?) AND id != ?`,
         [clienteToSave.rut, clienteToSave.email || '', clienteToSave.id],
         (err, existingCliente) => {
@@ -1319,7 +1842,7 @@ export class DatabaseService {
           }
 
           // Si no existe duplicado, proceder con el guardado
-          this.db.run(
+          db.run(
             `INSERT OR REPLACE INTO clientes (id, nombre, rut, telefono, email, direccion, fechaRegistro)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [id, clienteToSave.nombre, clienteToSave.rut, clienteToSave.telefono, 
@@ -1341,7 +1864,7 @@ export class DatabaseService {
 
   async deleteCliente(id: number): Promise<boolean> {
     return new Promise((resolve, reject) => {
-      const db = this.db;
+      const db = this.ensureDb();
       
       // Validar ID
       if (!id || typeof id !== 'number' || id <= 0) {
@@ -1493,7 +2016,7 @@ export class DatabaseService {
   // Función para limpiar duplicados de clientes
   async limpiarDuplicadosClientes(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.db.run(`
+      this.ensureDb().run(`
         DELETE FROM clientes 
         WHERE id NOT IN (
           SELECT MIN(id) 
@@ -1513,7 +2036,7 @@ export class DatabaseService {
   // Métodos para vehículos
   async getAllVehiculos(): Promise<Vehiculo[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM vehiculos ORDER BY marca, modelo', (err, rows) => {
+      this.ensureDb().all('SELECT * FROM vehiculos ORDER BY marca, modelo', (err, rows) => {
         if (err) reject(err);
         else resolve(rows as Vehiculo[]);
       });
@@ -1526,13 +2049,13 @@ export class DatabaseService {
     if (cached) return cached;
 
     return new Promise((resolve, reject) => {
-      this.db.get('SELECT COUNT(*) as total FROM vehiculos', (err: any, row: any) => {
+      this.ensureDb().get('SELECT COUNT(*) as total FROM vehiculos', (err: any, row: any) => {
         if (err) {
           reject(err);
           return;
         }
         const total = row?.total ?? 0;
-        this.db.all(
+        this.ensureDb().all(
           'SELECT * FROM vehiculos ORDER BY marca, modelo LIMIT ? OFFSET ?',
           [limit, offset],
           (err2: any, rows: any[]) => {
@@ -1554,7 +2077,7 @@ export class DatabaseService {
 
     return new Promise((resolve, reject) => {
       // Validar FK: cliente debe existir
-      this.db.get('SELECT COUNT(*) as c FROM clientes WHERE id = ?', [vehiculoToSave.clienteId], (chkErr: any, row: any) => {
+      this.ensureDb().get('SELECT COUNT(*) as c FROM clientes WHERE id = ?', [vehiculoToSave.clienteId], (chkErr: any, row: any) => {
         if (chkErr) {
           reject(chkErr);
           return;
@@ -1564,12 +2087,12 @@ export class DatabaseService {
           return;
         }
 
-      this.db.run(
-        `INSERT OR REPLACE INTO vehiculos (id, clienteId, marca, modelo, año, patente, color, kilometraje, observaciones, activo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      this.ensureDb().run(
+        `INSERT OR REPLACE INTO vehiculos (id, clienteId, marca, modelo, año, patente, numeroChasis, color, kilometraje, observaciones, activo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, vehiculoToSave.clienteId, vehiculoToSave.marca, vehiculoToSave.modelo, 
-         vehiculoToSave.año, vehiculoToSave.patente, vehiculoToSave.color, vehiculoToSave.kilometraje, 
-         vehiculoToSave.observaciones, vehiculoToSave.activo],
+         vehiculoToSave.año, vehiculoToSave.patente, vehiculoToSave.numeroChasis, vehiculoToSave.color, 
+         vehiculoToSave.kilometraje, vehiculoToSave.observaciones, vehiculoToSave.activo],
         (err: any) => {
           if (err) reject(err);
           else {
@@ -1586,7 +2109,7 @@ export class DatabaseService {
   async deleteVehiculo(id: number): Promise<boolean> {
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
-      this.db.run(
+      this.ensureDb().run(
         'DELETE FROM vehiculos WHERE id = ?',
         [id],
         function(err: any) {
@@ -1604,7 +2127,7 @@ export class DatabaseService {
   // Métodos para servicios
   async getAllServicios(): Promise<Servicio[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM servicios ORDER BY nombre', (err, rows) => {
+      this.ensureDb().all('SELECT * FROM servicios ORDER BY nombre', (err, rows) => {
         if (err) reject(err);
         else resolve(rows as Servicio[]);
       });
@@ -1617,7 +2140,7 @@ export class DatabaseService {
 
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
-      this.db.run(
+      this.ensureDb().run(
         `INSERT OR REPLACE INTO servicios (id, nombre, descripcion, precio, duracionEstimada, activo)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [id, servicioToSave.nombre, servicioToSave.descripcion, servicioToSave.precio, 
@@ -1636,7 +2159,7 @@ export class DatabaseService {
 
   async deleteServicio(id: number): Promise<boolean> {
     return new Promise((resolve, reject) => {
-      this.db.run(
+      this.ensureDb().run(
         'DELETE FROM servicios WHERE id = ?',
         [id],
         function(err) {
@@ -1656,7 +2179,7 @@ export class DatabaseService {
     }
 
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM repuestos ORDER BY nombre', (err, rows) => {
+      this.ensureDb().all('SELECT * FROM repuestos ORDER BY nombre', (err, rows) => {
         if (err) reject(err);
         else {
           this.queryCache.set(cacheKey, rows as Repuesto[]);
@@ -1674,14 +2197,14 @@ export class DatabaseService {
     }
 
     return new Promise((resolve, reject) => {
-      this.db.get('SELECT COUNT(*) as total FROM repuestos', (err: any, countRow: any) => {
+      this.ensureDb().get('SELECT COUNT(*) as total FROM repuestos', (err: any, countRow: any) => {
         if (err) {
           reject(err);
           return;
         }
         const total = countRow?.total || 0;
 
-        this.db.all(
+        this.ensureDb().all(
           'SELECT * FROM repuestos ORDER BY nombre LIMIT ? OFFSET ?',
           [limit, offset],
           (err: any, rows: any[]) => {
@@ -1720,7 +2243,7 @@ export class DatabaseService {
       const ftsQuery = terms.map(t => `${t}*`).join(' OR ');
       
       // Usar índice FULLTEXT si está disponible (búsqueda rápida)
-      this.db.all(
+      this.ensureDb().all(
         `SELECT DISTINCT r.* FROM repuestos r
          JOIN repuestos_fts fts ON r.id = fts.rowid
          WHERE repuestos_fts MATCH ?
@@ -1748,7 +2271,7 @@ export class DatabaseService {
               return [termPattern, termPattern, termPattern, termPattern];
             });
             
-            this.db.all(
+            this.ensureDb().all(
               `SELECT * FROM repuestos 
                WHERE ${termConditions}
                ORDER BY 
@@ -1792,7 +2315,7 @@ export class DatabaseService {
 
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
-      this.db.run(
+      this.ensureDb().run(
         `INSERT OR REPLACE INTO repuestos (id, codigo, nombre, descripcion, precio, precioCosto, stock, stockMinimo, categoria, marca, ubicacion, activo)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, repuestoToSave.codigo, repuestoToSave.nombre, repuestoToSave.descripcion, 
@@ -1814,7 +2337,7 @@ export class DatabaseService {
   async deleteRepuesto(id: number): Promise<boolean> {
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
-      this.db.run(
+      this.ensureDb().run(
         'DELETE FROM repuestos WHERE id = ?',
         [id],
         function(err: any) {
@@ -1832,7 +2355,7 @@ export class DatabaseService {
   // Métodos para cotizaciones
   async getAllCotizaciones(): Promise<Cotizacion[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM cotizaciones ORDER BY fecha DESC', (err, rows) => {
+      this.ensureDb().all('SELECT * FROM cotizaciones ORDER BY fecha DESC', (err, rows) => {
         if (err) reject(err);
         else resolve(rows as Cotizacion[]);
       });
@@ -1845,13 +2368,13 @@ export class DatabaseService {
     if (cached) return cached;
 
     return new Promise((resolve, reject) => {
-      this.db.get('SELECT COUNT(*) as total FROM cotizaciones', (err: any, row: any) => {
+      this.ensureDb().get('SELECT COUNT(*) as total FROM cotizaciones', (err: any, row: any) => {
         if (err) {
           reject(err);
           return;
         }
         const total = row?.total ?? 0;
-        this.db.all(
+        this.ensureDb().all(
           'SELECT * FROM cotizaciones ORDER BY fecha DESC LIMIT ? OFFSET ?',
           [limit, offset],
           (err2: any, rows: any[]) => {
@@ -1886,7 +2409,7 @@ export class DatabaseService {
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
       // Validar que los IDs existan antes de insertar
-      this.db.get('SELECT COUNT(*) as count FROM clientes WHERE id = ?', [cotizacionToSave.clienteId], (err, row: any) => {
+      this.ensureDb().get('SELECT COUNT(*) as count FROM clientes WHERE id = ?', [cotizacionToSave.clienteId], (err, row: any) => {
         if (err) {
           console.error('❌ Error verificando cliente:', err);
           reject(err);
@@ -1900,7 +2423,7 @@ export class DatabaseService {
           return;
         }
 
-        this.db.get('SELECT COUNT(*) as count FROM vehiculos WHERE id = ?', [cotizacionToSave.vehiculoId], (err, row: any) => {
+        this.ensureDb().get('SELECT COUNT(*) as count FROM vehiculos WHERE id = ?', [cotizacionToSave.vehiculoId], (err, row: any) => {
           if (err) {
             console.error('❌ Error verificando vehículo:', err);
             reject(err);
@@ -1915,13 +2438,13 @@ export class DatabaseService {
           }
 
           // Transacción para insertar cotización (atomicidad)
-          const begin = () => new Promise<void>((res, rej) => this.db.run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
-          const commit = () => new Promise<void>((res, rej) => this.db.run('COMMIT', (e) => e ? rej(e) : res()));
-          const rollback = () => new Promise<void>((res) => this.db.run('ROLLBACK', () => res()));
+          const begin = () => new Promise<void>((res, rej) => this.ensureDb().run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
+          const commit = () => new Promise<void>((res, rej) => this.ensureDb().run('COMMIT', (e) => e ? rej(e) : res()));
+          const rollback = () => new Promise<void>((res) => this.ensureDb().run('ROLLBACK', () => res()));
 
           begin()
             .then(() => new Promise<void>((res, rej) => {
-              dbServiceInstance.db.run(
+              dbServiceInstance.ensureDb().run(
             `INSERT OR REPLACE INTO cotizaciones (id, numero, clienteId, vehiculoId, fecha, validaHasta, estado, descripcion, observaciones, total)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [id, cotizacionToSave.numero, cotizacionToSave.clienteId, cotizacionToSave.vehiculoId, 
@@ -1956,7 +2479,7 @@ export class DatabaseService {
   async deleteCotizacion(id: number): Promise<boolean> {
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
-      this.db.run(
+      this.ensureDb().run(
         'DELETE FROM cotizaciones WHERE id = ?',
         [id],
         function(err: any) {
@@ -1981,7 +2504,7 @@ export class DatabaseService {
 
     return retryWithBackoff(() => {
       return new Promise<OrdenTrabajo[]>((resolve, reject) => {
-        this.db.all('SELECT * FROM ordenes_trabajo ORDER BY fechaIngreso DESC', (err, rows) => {
+        this.ensureDb().all('SELECT * FROM ordenes_trabajo ORDER BY fechaIngreso DESC', (err, rows) => {
           if (err) reject(err);
           else {
             this.queryCache.set(cacheKey, rows as OrdenTrabajo[]);
@@ -2004,14 +2527,14 @@ export class DatabaseService {
     }
 
     return new Promise((resolve, reject) => {
-      this.db.get('SELECT COUNT(*) as total FROM ordenes_trabajo', (err: any, countRow: any) => {
+      this.ensureDb().get('SELECT COUNT(*) as total FROM ordenes_trabajo', (err: any, countRow: any) => {
         if (err) {
           reject(err);
           return;
         }
         const total = countRow?.total || 0;
 
-        this.db.all(
+        this.ensureDb().all(
           'SELECT * FROM ordenes_trabajo ORDER BY fechaIngreso DESC LIMIT ? OFFSET ?',
           [limit, offset],
           (err: any, rows: any[]) => {
@@ -2090,28 +2613,28 @@ export class DatabaseService {
 
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
-      const begin = () => new Promise<void>((res, rej) => this.db.run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
-      const commit = () => new Promise<void>((res, rej) => this.db.run('COMMIT', (e) => e ? rej(e) : res()));
-      const rollback = () => new Promise<void>((res) => this.db.run('ROLLBACK', () => res()));
+      const begin = () => new Promise<void>((res, rej) => this.ensureDb().run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
+      const commit = () => new Promise<void>((res, rej) => this.ensureDb().run('COMMIT', (e) => e ? rej(e) : res()));
+      const rollback = () => new Promise<void>((res) => this.ensureDb().run('ROLLBACK', () => res()));
 
       begin()
         // Validaciones FK explícitas para dar mejores mensajes
         .then(() => new Promise<void>((res, rej) => {
-          dbServiceInstance.db.get('SELECT COUNT(*) as c FROM clientes WHERE id = ?', [ordenToSave.clienteId], (err: any, row: any) => {
+          dbServiceInstance.ensureDb().get('SELECT COUNT(*) as c FROM clientes WHERE id = ?', [ordenToSave.clienteId], (err: any, row: any) => {
             if (err) return rej(err);
             if (!row || row.c === 0) return rej(new Error(`Cliente con ID ${ordenToSave.clienteId} no existe`));
             res();
           });
         }))
         .then(() => new Promise<void>((res, rej) => {
-          dbServiceInstance.db.get('SELECT COUNT(*) as c FROM vehiculos WHERE id = ?', [ordenToSave.vehiculoId], (err: any, row: any) => {
+          dbServiceInstance.ensureDb().get('SELECT COUNT(*) as c FROM vehiculos WHERE id = ?', [ordenToSave.vehiculoId], (err: any, row: any) => {
             if (err) return rej(err);
             if (!row || row.c === 0) return rej(new Error(`Vehículo con ID ${ordenToSave.vehiculoId} no existe`));
             res();
           });
         }))
         .then(() => new Promise<void>((res, rej) => {
-          dbServiceInstance.db.run(
+          dbServiceInstance.ensureDb().run(
         `INSERT OR REPLACE INTO ordenes_trabajo (id, numero, clienteId, vehiculoId, fechaIngreso, fechaEntrega, estado, descripcion, observaciones, total, kilometrajeEntrada, kilometrajeSalida, prioridad, tecnicoAsignado, metodoPago, numeroCuotas, fechaPago)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, ordenToSave.numero, ordenToSave.clienteId, ordenToSave.vehiculoId, 
@@ -2150,7 +2673,7 @@ export class DatabaseService {
       const dbServiceInstance = this;
 
       // Verificar que la orden existe antes de intentar eliminarla
-      this.db.get('SELECT id FROM ordenes_trabajo WHERE id = ?', [id], (err: any, row: any) => {
+      this.ensureDb().get('SELECT id FROM ordenes_trabajo WHERE id = ?', [id], (err: any, row: any) => {
         if (err) {
           console.error('Error verificando existencia de orden:', err);
           reject(new Error(`Error al verificar la orden: ${err.message}`));
@@ -2163,64 +2686,100 @@ export class DatabaseService {
         }
 
         // Usar transacción para asegurar consistencia
-        dbServiceInstance.db.serialize(() => {
+        dbServiceInstance.ensureDb().serialize(() => {
           // Iniciar transacción
-          dbServiceInstance.db.run('BEGIN TRANSACTION', (errBegin: any) => {
+          dbServiceInstance.ensureDb().run('BEGIN TRANSACTION', (errBegin: any) => {
             if (errBegin) {
               console.error('Error iniciando transacción:', errBegin);
               reject(new Error(`Error al iniciar la transacción: ${errBegin.message}`));
               return;
             }
 
-            // Eliminar SOLO los detalles de ESTA orden específica (servicios y repuestos de esta orden)
-            // NOTA: Esto solo elimina los detalles de la orden que estás eliminando, NO afecta otras órdenes
-            dbServiceInstance.db.run('DELETE FROM detalles_orden WHERE ordenId = ?', [id], (errDetalles: any) => {
-              if (errDetalles) {
-                dbServiceInstance.db.run('ROLLBACK', () => {
-                  console.error('Error eliminando detalles de orden:', errDetalles);
-                  reject(new Error(`Error al eliminar detalles de la orden: ${errDetalles.message}`));
-                });
-                return;
-              }
-
-              // Eliminar SOLO esta orden específica (la que el usuario seleccionó)
-              // NOTA: Solo elimina la orden con este ID, NO elimina otras órdenes
-              dbServiceInstance.db.run('DELETE FROM ordenes_trabajo WHERE id = ?', [id], function(errOrden: any) {
-                if (errOrden) {
-                  dbServiceInstance.db.run('ROLLBACK', () => {
-                    console.error('Error eliminando orden de trabajo:', errOrden);
-                    reject(new Error(`Error al eliminar la orden de trabajo: ${errOrden.message}`));
+            // Restituir stock de repuestos asociados a la orden antes de eliminar detalles
+            dbServiceInstance.ensureDb().all(
+              'SELECT repuestoId, cantidad FROM detalles_orden WHERE ordenId = ? AND tipo = ? AND repuestoId IS NOT NULL',
+              [id, 'repuesto'],
+              (errRepuestos: any, rows: Array<{ repuestoId: number; cantidad: number }>) => {
+                if (errRepuestos) {
+                  dbServiceInstance.ensureDb().run('ROLLBACK', () => {
+                    console.error('Error obteniendo repuestos de la orden:', errRepuestos);
+                    reject(new Error(`Error al obtener repuestos de la orden: ${errRepuestos.message}`));
                   });
                   return;
                 }
 
-                const deleted = (this as any).changes > 0;
-                
-                if (deleted) {
-                  // Confirmar transacción
-                  dbServiceInstance.db.run('COMMIT', (errCommit: any) => {
-                    if (errCommit) {
-                      console.error('Error en commit:', errCommit);
-                      reject(new Error(`Error al confirmar la eliminación: ${errCommit.message}`));
+                const updates = (rows || []).map((row) => {
+                  const cantidad = Number(row.cantidad) || 1;
+                  return new Promise<void>((resolveUpdate, rejectUpdate) => {
+                    dbServiceInstance.ensureDb().run(
+                      'UPDATE repuestos SET stock = stock + ? WHERE id = ?',
+                      [cantidad, row.repuestoId],
+                      (updateErr: any) => {
+                        if (updateErr) rejectUpdate(updateErr);
+                        else resolveUpdate();
+                      }
+                    );
+                  });
+                });
+
+                Promise.all(updates).then(() => {
+                  // Eliminar SOLO los detalles de ESTA orden específica (servicios y repuestos de esta orden)
+                  // NOTA: Esto solo elimina los detalles de la orden que estás eliminando, NO afecta otras órdenes
+                  dbServiceInstance.ensureDb().run('DELETE FROM detalles_orden WHERE ordenId = ?', [id], (errDetalles: any) => {
+                    if (errDetalles) {
+                      dbServiceInstance.ensureDb().run('ROLLBACK', () => {
+                        console.error('Error eliminando detalles de orden:', errDetalles);
+                        reject(new Error(`Error al eliminar detalles de la orden: ${errDetalles.message}`));
+                      });
                       return;
                     }
 
-                    // Invalidar caché después de eliminar
-                    dbServiceInstance.invalidateCache();
-                    
-                    // Crear backup automático después de eliminar orden
-                    dbServiceInstance.createAutoBackup().catch(console.error);
-                    
-                    console.log(`✅ Orden de trabajo ${id} eliminada exitosamente`);
-                    resolve(true);
+                    // Eliminar SOLO esta orden específica (la que el usuario seleccionó)
+                    // NOTA: Solo elimina la orden con este ID, NO elimina otras órdenes
+                    dbServiceInstance.ensureDb().run('DELETE FROM ordenes_trabajo WHERE id = ?', [id], function(errOrden: any) {
+                      if (errOrden) {
+                        dbServiceInstance.ensureDb().run('ROLLBACK', () => {
+                          console.error('Error eliminando orden de trabajo:', errOrden);
+                          reject(new Error(`Error al eliminar la orden de trabajo: ${errOrden.message}`));
+                        });
+                        return;
+                      }
+
+                      const deleted = (this as any).changes > 0;
+                      
+                      if (deleted) {
+                        // Confirmar transacción
+                        dbServiceInstance.ensureDb().run('COMMIT', (errCommit: any) => {
+                          if (errCommit) {
+                            console.error('Error en commit:', errCommit);
+                            reject(new Error(`Error al confirmar la eliminación: ${errCommit.message}`));
+                            return;
+                          }
+
+                          // Invalidar caché después de eliminar
+                          dbServiceInstance.invalidateCache();
+                          
+                          // Crear backup automático después de eliminar orden
+                          dbServiceInstance.createAutoBackup().catch(console.error);
+                          
+                          console.log(`✅ Orden de trabajo ${id} eliminada exitosamente`);
+                          resolve(true);
+                        });
+                      } else {
+                        dbServiceInstance.ensureDb().run('ROLLBACK', () => {
+                          reject(new Error('No se pudo eliminar la orden de trabajo (ningún registro afectado)'));
+                        });
+                      }
+                    });
                   });
-                } else {
-                  dbServiceInstance.db.run('ROLLBACK', () => {
-                    reject(new Error('No se pudo eliminar la orden de trabajo (ningún registro afectado)'));
+                }).catch((updateErr) => {
+                  dbServiceInstance.ensureDb().run('ROLLBACK', () => {
+                    console.error('Error restituyendo stock:', updateErr);
+                    reject(new Error(`Error al restituir stock: ${updateErr.message}`));
                   });
-                }
-              });
-            });
+                });
+              }
+            );
           });
         });
       });
@@ -2230,7 +2789,7 @@ export class DatabaseService {
   // Métodos para detalles de cotización
   async getDetallesCotizacion(cotizacionId: number): Promise<DetalleCotizacion[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM detalles_cotizacion WHERE cotizacionId = ?', [cotizacionId], (err, rows) => {
+      this.ensureDb().all('SELECT * FROM detalles_cotizacion WHERE cotizacionId = ?', [cotizacionId], (err, rows) => {
         if (err) reject(err);
         else resolve(rows as DetalleCotizacion[]);
       });
@@ -2242,7 +2801,7 @@ export class DatabaseService {
     const detalleToSave = { ...detalle, id };
 
     return new Promise((resolve, reject) => {
-      this.db.run(
+      this.ensureDb().run(
         `INSERT OR REPLACE INTO detalles_cotizacion (id, cotizacionId, tipo, servicioId, repuestoId, cantidad, precio, subtotal, descripcion)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, detalleToSave.cotizacionId, detalleToSave.tipo, detalleToSave.servicioId, 
@@ -2259,7 +2818,7 @@ export class DatabaseService {
   // Métodos para detalles de orden
   async getDetallesOrden(ordenId: number): Promise<DetalleOrden[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM detalles_orden WHERE ordenId = ?', [ordenId], (err, rows) => {
+      this.ensureDb().all('SELECT * FROM detalles_orden WHERE ordenId = ?', [ordenId], (err, rows) => {
         if (err) reject(err);
         else resolve(rows as DetalleOrden[]);
       });
@@ -2271,7 +2830,7 @@ export class DatabaseService {
     const detalleToSave = { ...detalle, id };
 
     return new Promise((resolve, reject) => {
-      this.db.run(
+      this.ensureDb().run(
         `INSERT OR REPLACE INTO detalles_orden (id, ordenId, tipo, servicioId, repuestoId, cantidad, precio, subtotal, descripcion)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, detalleToSave.ordenId, detalleToSave.tipo, detalleToSave.servicioId, 
@@ -2287,7 +2846,7 @@ export class DatabaseService {
 
   async deleteDetallesOrden(ordenId: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.db.run('DELETE FROM detalles_orden WHERE ordenId = ?', [ordenId], (err) => {
+      this.ensureDb().run('DELETE FROM detalles_orden WHERE ordenId = ?', [ordenId], (err) => {
         if (err) reject(err);
         else resolve();
       });
@@ -2297,7 +2856,7 @@ export class DatabaseService {
   // Métodos para cuotas de pago
   async getAllCuotasPago(): Promise<CuotaPago[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM cuotas_pago ORDER BY ordenId ASC, numeroCuota ASC', (err, rows) => {
+      this.ensureDb().all('SELECT * FROM cuotas_pago ORDER BY ordenId ASC, numeroCuota ASC', (err, rows) => {
         if (err) {
           console.error('❌ Error obteniendo todas las cuotas:', err);
           reject(err);
@@ -2332,7 +2891,7 @@ export class DatabaseService {
 
   async getCuotasPagoByOrden(ordenId: number): Promise<CuotaPago[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM cuotas_pago WHERE ordenId = ? ORDER BY numeroCuota ASC', [ordenId], (err, rows) => {
+      this.ensureDb().all('SELECT * FROM cuotas_pago WHERE ordenId = ? ORDER BY numeroCuota ASC', [ordenId], (err, rows) => {
         if (err) reject(err);
         else resolve(rows as CuotaPago[]);
       });
@@ -2341,7 +2900,7 @@ export class DatabaseService {
 
   async getCuotasPendientes(): Promise<CuotaPago[]> {
     return new Promise((resolve, reject) => {
-      this.db.all(
+      this.ensureDb().all(
         `SELECT * FROM cuotas_pago 
          WHERE estado = 'Pendiente' 
          ORDER BY fechaVencimiento ASC`,
@@ -2359,7 +2918,7 @@ export class DatabaseService {
     const dbServiceInstance = this;
 
     return new Promise((resolve, reject) => {
-      dbServiceInstance.db.run(
+      dbServiceInstance.ensureDb().run(
         `INSERT OR REPLACE INTO cuotas_pago (id, ordenId, numeroCuota, fechaVencimiento, monto, montoPagado, fechaPago, estado, observaciones)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -2397,20 +2956,21 @@ export class DatabaseService {
 
     const dbServiceInstance = this;
     return new Promise((resolve, reject) => {
-      dbServiceInstance.db.serialize(() => {
-        dbServiceInstance.db.run('BEGIN TRANSACTION');
+      const db = dbServiceInstance.ensureDb();
+      db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
         
         // Primero eliminar cuotas existentes para esta orden para evitar duplicados
-        dbServiceInstance.db.run('DELETE FROM cuotas_pago WHERE ordenId = ?', [ordenId], (deleteErr: any) => {
+        db.run('DELETE FROM cuotas_pago WHERE ordenId = ?', [ordenId], (deleteErr: any) => {
           if (deleteErr) {
-            dbServiceInstance.db.run('ROLLBACK', () => {
+            db.run('ROLLBACK', () => {
               reject(new Error(`Error eliminando cuotas existentes: ${deleteErr.message}`));
             });
             return;
           }
 
           // Ahora insertar las nuevas cuotas
-          const stmt = dbServiceInstance.db.prepare(
+          const stmt = db.prepare(
             `INSERT INTO cuotas_pago (ordenId, numeroCuota, fechaVencimiento, monto, montoPagado, fechaPago, estado, observaciones)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
           );
@@ -2469,16 +3029,16 @@ export class DatabaseService {
                 if (completed === cuotas.length) {
                   stmt.finalize();
                   if (hasError) {
-                    dbServiceInstance.db.run('ROLLBACK', () => {
+                    db.run('ROLLBACK', () => {
                       reject(new Error(`Error guardando cuotas: ${errors.map(e => e.message).join(', ')}`));
                     });
                   } else {
-                    dbServiceInstance.db.run('COMMIT', () => {
+                    db.run('COMMIT', () => {
                       // Log solo en desarrollo
                       if (!app.isPackaged) {
                         console.log(`✅ Todas las cuotas (${cuotas.length}) guardadas exitosamente para orden ${ordenId}`);
                         // Verificar que se guardaron todas
-                        dbServiceInstance.db.all('SELECT numeroCuota FROM cuotas_pago WHERE ordenId = ? ORDER BY numeroCuota', [ordenId], (verifErr: any, verifRows: any) => {
+                        db.all('SELECT numeroCuota FROM cuotas_pago WHERE ordenId = ? ORDER BY numeroCuota', [ordenId], (verifErr: any, verifRows: any) => {
                           if (!verifErr && verifRows) {
                             const numerosGuardados = verifRows.map((r: any) => r.numeroCuota);
                             console.log(`✅ Verificación: Cuotas guardadas en BD para orden ${ordenId}:`, numerosGuardados);
@@ -2503,7 +3063,7 @@ export class DatabaseService {
 
   async confirmarPagoCuota(cuotaId: number, montoPagado: number, fechaPago: string, observaciones?: string): Promise<CuotaPago> {
     return new Promise((resolve, reject) => {
-      this.db.get('SELECT * FROM cuotas_pago WHERE id = ?', [cuotaId], (err: any, row: any) => {
+      this.ensureDb().get('SELECT * FROM cuotas_pago WHERE id = ?', [cuotaId], (err: any, row: any) => {
         if (err) {
           reject(err);
           return;
@@ -2517,7 +3077,7 @@ export class DatabaseService {
         const nuevoMontoPagado = (cuota.montoPagado || 0) + montoPagado;
         const nuevoEstado = nuevoMontoPagado >= cuota.monto ? 'Pagada' : cuota.estado;
 
-        this.db.run(
+        this.ensureDb().run(
           `UPDATE cuotas_pago 
            SET montoPagado = ?, fechaPago = ?, estado = ?, observaciones = ?
            WHERE id = ?`,
@@ -2534,7 +3094,7 @@ export class DatabaseService {
               return;
             }
             this.invalidateCache();
-            this.db.get('SELECT * FROM cuotas_pago WHERE id = ?', [cuotaId], (selectErr: any, updatedRow: any) => {
+            this.ensureDb().get('SELECT * FROM cuotas_pago WHERE id = ?', [cuotaId], (selectErr: any, updatedRow: any) => {
               if (selectErr) reject(selectErr);
               else resolve(updatedRow as CuotaPago);
             });
@@ -2547,7 +3107,8 @@ export class DatabaseService {
   async actualizarEstadosCuotasVencidas(): Promise<void> {
     const hoy = new Date().toISOString().split('T')[0];
     return new Promise((resolve, reject) => {
-      this.db.run(
+      const db = this.ensureDb();
+      db.run(
         `UPDATE cuotas_pago 
          SET estado = 'Vencida' 
          WHERE estado = 'Pendiente' AND fechaVencimiento < ?`,
@@ -2576,7 +3137,7 @@ export class DatabaseService {
     };
 
     return new Promise((resolve, reject) => {
-      const db = this.db;
+      const db = this.ensureDb();
       const begin = () => new Promise<void>((res, rej) => db.run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
       const commit = () => new Promise<void>((res, rej) => db.run('COMMIT', (e) => e ? rej(e) : res()));
       const rollback = () => new Promise<void>((res) => db.run('ROLLBACK', () => res()));
@@ -2613,6 +3174,33 @@ export class DatabaseService {
             }
           );
         }))
+        // Devolver stock de detalles anteriores (solo repuestos)
+        .then(() => new Promise<void>((res, rej) => {
+          db.all(
+            'SELECT repuestoId, cantidad FROM detalles_orden WHERE ordenId = ? AND tipo = ? AND repuestoId IS NOT NULL',
+            [ordenId, 'repuesto'],
+            (err: any, rows: Array<{ repuestoId: number; cantidad: number }>) => {
+              if (err) return rej(err);
+              if (!rows || rows.length === 0) return res();
+
+              const updates = rows.map((row) => {
+                const cantidad = Number(row.cantidad) || 1;
+                return new Promise<void>((resolveUpdate, rejectUpdate) => {
+                  db.run(
+                    'UPDATE repuestos SET stock = stock + ? WHERE id = ?',
+                    [cantidad, row.repuestoId],
+                    (updateErr: any) => {
+                      if (updateErr) rejectUpdate(updateErr);
+                      else resolveUpdate();
+                    }
+                  );
+                });
+              });
+
+              Promise.all(updates).then(() => res()).catch(rej);
+            }
+          );
+        }))
         // Eliminar detalles antiguos
         .then(() => new Promise<void>((res, rej) => {
           db.run('DELETE FROM detalles_orden WHERE ordenId = ?', [ordenId], (err: any) => {
@@ -2620,6 +3208,38 @@ export class DatabaseService {
             else res();
           });
         }))
+        // Descontar stock para detalles nuevos (solo repuestos)
+        .then(() => {
+          const repuestoDetalles = (detalles || []).filter(
+            (detalle) => detalle.tipo === 'repuesto' && detalle.repuestoId
+          );
+          if (repuestoDetalles.length === 0) {
+            return Promise.resolve();
+          }
+
+          const updates = repuestoDetalles.map((detalle) => {
+            const cantidad = Number(detalle.cantidad) || 1;
+            return new Promise<void>((resolveUpdate, rejectUpdate) => {
+              db.run(
+                'UPDATE repuestos SET stock = stock - ? WHERE id = ? AND stock >= ?',
+                [cantidad, detalle.repuestoId, cantidad],
+                function(updateErr: any) {
+                  if (updateErr) {
+                    rejectUpdate(updateErr);
+                    return;
+                  }
+                  if ((this as any).changes === 0) {
+                    rejectUpdate(new Error(`Stock insuficiente para repuesto ${detalle.repuestoId}`));
+                    return;
+                  }
+                  resolveUpdate();
+                }
+              );
+            });
+          });
+
+          return Promise.all(updates).then(() => undefined);
+        })
         // Guardar detalles nuevos
         .then(() => {
           // Los detalles ya fueron eliminados en el paso anterior, ahora solo insertar los nuevos
@@ -2796,7 +3416,7 @@ export class DatabaseService {
     const fecha = new Date().toISOString();
 
     return new Promise((resolve, reject) => {
-      const db = this.db;
+      const db = this.ensureDb();
       const begin = () => new Promise<void>((res, rej) => db.run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
       const commit = () => new Promise<void>((res, rej) => db.run('COMMIT', (e) => e ? rej(e) : res()));
       const rollback = () => new Promise<void>((res) => db.run('ROLLBACK', () => res()));
@@ -2838,6 +3458,35 @@ export class DatabaseService {
             }
           );
         }))
+        // Descontar stock para repuestos de la venta
+        .then(() => {
+          if (!ventaData.repuestos || ventaData.repuestos.length === 0) {
+            return Promise.reject(new Error('Debe haber al menos un repuesto en la venta'));
+          }
+
+          const updates = ventaData.repuestos.map((repuesto) => {
+            const cantidad = Number(repuesto.cantidad) || 1;
+            return new Promise<void>((resolveUpdate, rejectUpdate) => {
+              db.run(
+                'UPDATE repuestos SET stock = stock - ? WHERE id = ? AND stock >= ?',
+                [cantidad, repuesto.id, cantidad],
+                function(updateErr: any) {
+                  if (updateErr) {
+                    rejectUpdate(updateErr);
+                    return;
+                  }
+                  if ((this as any).changes === 0) {
+                    rejectUpdate(new Error(`Stock insuficiente para repuesto ${repuesto.id}`));
+                    return;
+                  }
+                  resolveUpdate();
+                }
+              );
+            });
+          });
+
+          return Promise.all(updates).then(() => undefined);
+        })
         // Guardar detalles de venta
         .then(() => {
           if (!ventaData.repuestos || ventaData.repuestos.length === 0) {
@@ -2916,7 +3565,7 @@ export class DatabaseService {
     };
 
     return new Promise((resolve, reject) => {
-      const db = this.db;
+      const db = this.ensureDb();
       const begin = () => new Promise<void>((res, rej) => db.run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
       const commit = () => new Promise<void>((res, rej) => db.run('COMMIT', (e) => e ? rej(e) : res()));
       const rollback = () => new Promise<void>((res) => db.run('ROLLBACK', () => res()));
@@ -3092,7 +3741,7 @@ export class DatabaseService {
 
   // Guardar cliente y vehículos en una sola transacción para evitar errores de FK
   async saveClienteConVehiculos(cliente: Cliente, vehiculos: Vehiculo[]): Promise<Cliente> {
-    const db = this.db;
+    const db = this.ensureDb();
     const begin = () => new Promise<void>((res, rej) => db.run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
     const commit = () => new Promise<void>((res, rej) => db.run('COMMIT', (e) => e ? rej(e) : res()));
     const rollback = () => new Promise<void>((res) => db.run('ROLLBACK', () => res()));
@@ -3140,13 +3789,14 @@ export class DatabaseService {
   // Método para obtener estadísticas de inventario
   async getEstadisticasInventario(): Promise<any> {
     return new Promise((resolve, reject) => {
-      this.db.get('SELECT COUNT(*) as total, SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END) as conStock, SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END) as sinStock FROM repuestos', (err, stats: any) => {
+      const db = this.ensureDb();
+      db.get('SELECT COUNT(*) as total, SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END) as conStock, SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END) as sinStock FROM repuestos', (err, stats: any) => {
         if (err) {
           reject(err);
           return;
         }
 
-        this.db.all('SELECT categoria, COUNT(*) as cantidad FROM repuestos GROUP BY categoria', (err2, categorias) => {
+        db.all('SELECT categoria, COUNT(*) as cantidad FROM repuestos GROUP BY categoria', (err2, categorias) => {
           if (err2) {
             reject(err2);
             return;
@@ -3166,7 +3816,8 @@ export class DatabaseService {
   // Funciones helper para validación de integridad referencial
   async validateForeignKey(table: string, id: number, fieldName: string): Promise<boolean> {
     return new Promise((resolve, reject) => {
-      this.db.get(`SELECT COUNT(*) as count FROM ${table} WHERE id = ?`, [id], (err, row: any) => {
+      const db = this.ensureDb();
+      db.get(`SELECT COUNT(*) as count FROM ${table} WHERE id = ?`, [id], (err, row: any) => {
         if (err) {
           reject(new Error(`Error validando ${fieldName}: ${err.message}`));
         } else {
@@ -3195,7 +3846,8 @@ export class DatabaseService {
   // Métodos para configuración
   async getAllConfiguracion(): Promise<any[]> {
     return new Promise((resolve, reject) => {
-      this.db.all('SELECT * FROM configuracion ORDER BY clave', (err, rows) => {
+      const db = this.ensureDb();
+      db.all('SELECT * FROM configuracion ORDER BY clave', (err, rows) => {
         if (err) reject(err);
         else resolve(rows as any[]);
       });
@@ -3208,7 +3860,8 @@ export class DatabaseService {
 
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
-      this.db.run(
+      const db = this.ensureDb();
+      db.run(
         `INSERT OR REPLACE INTO configuracion (id, clave, valor, descripcion)
          VALUES (?, ?, ?, ?)`,
         [id, configToSave.clave, configToSave.valor, configToSave.descripcion],
@@ -3227,7 +3880,8 @@ export class DatabaseService {
   // Métodos para importación de repuestos
   async importarRepuestosDesdeJSON(repuestos: any[]): Promise<void> {
     return new Promise((resolve, reject) => {
-      const stmt = this.db.prepare(`
+      const db = this.ensureDb();
+      const stmt = db.prepare(`
         INSERT OR REPLACE INTO repuestos (codigo, nombre, descripcion, precio, precioCosto, stock, stockMinimo, categoria, marca, ubicacion, activo)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
@@ -3269,9 +3923,10 @@ export class DatabaseService {
   async limpiarRepuestos(): Promise<void> {
     return new Promise((resolve, reject) => {
       const dbServiceInstance = this;
+      const db = this.ensureDb();
       
       // Primero obtener el conteo para logging
-      this.db.get('SELECT COUNT(*) as total FROM repuestos', (errCount: any, row: any) => {
+      db.get('SELECT COUNT(*) as total FROM repuestos', (errCount: any, row: any) => {
         if (errCount) {
           console.warn('No se pudo obtener el conteo de repuestos:', errCount);
         } else {
@@ -3280,7 +3935,7 @@ export class DatabaseService {
         }
         
         // Eliminar todos los repuestos
-        this.db.run('DELETE FROM repuestos', function(err: any) {
+        db.run('DELETE FROM repuestos', function(err: any) {
           if (err) {
             console.error('Error eliminando repuestos:', err);
             reject(new Error(`Error al eliminar repuestos: ${err.message}`));
@@ -3296,6 +3951,68 @@ export class DatabaseService {
           // Crear backup automático después de limpiar repuestos
           dbServiceInstance.createAutoBackup().catch(console.error);
           
+          resolve();
+        });
+      });
+    });
+  }
+
+  async limpiarServicios(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const dbServiceInstance = this;
+      const db = this.ensureDb();
+      
+      db.get('SELECT COUNT(*) as total FROM servicios', (errCount: any, row: any) => {
+        if (errCount) {
+          console.warn('No se pudo obtener el conteo de servicios:', errCount);
+        } else {
+          const total = row?.total || 0;
+          console.log(`🗑️ Eliminando ${total} servicios...`);
+        }
+        
+        db.run('DELETE FROM servicios', function(err: any) {
+          if (err) {
+            console.error('Error eliminando servicios:', err);
+            reject(new Error(`Error al eliminar servicios: ${err.message}`));
+            return;
+          }
+          
+          const deleted = (this as any).changes || 0;
+          console.log(`✅ ${deleted} servicios eliminados exitosamente`);
+          
+          dbServiceInstance.invalidateCache();
+          dbServiceInstance.createAutoBackup().catch(console.error);
+          resolve();
+        });
+      });
+    });
+  }
+
+  async limpiarClientes(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const dbServiceInstance = this;
+      const db = this.ensureDb();
+      
+      db.get('SELECT COUNT(*) as total FROM clientes', (errCount: any, row: any) => {
+        if (errCount) {
+          console.warn('No se pudo obtener el conteo de clientes:', errCount);
+        } else {
+          const total = row?.total || 0;
+          console.log(`🗑️ Eliminando ${total} clientes...`);
+        }
+        
+        db.run('DELETE FROM clientes', function(err: any) {
+          if (err) {
+            console.error('Error eliminando clientes:', err);
+            reject(new Error(`Error al eliminar clientes: ${err.message}`));
+            return;
+          }
+          
+          const deleted = (this as any).changes || 0;
+          console.log(`✅ ${deleted} clientes eliminados exitosamente`);
+          
+          dbServiceInstance.invalidateCache();
+          dbServiceInstance.createAutoBackup().catch(console.error);
           resolve();
         });
       });
@@ -3334,13 +4051,14 @@ export class DatabaseService {
 
   async obtenerEstadisticasRepuestos(): Promise<any> {
     return new Promise((resolve, reject) => {
-      this.db.get('SELECT COUNT(*) as total, SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END) as conStock, SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END) as sinStock FROM repuestos', (err, stats: any) => {
+      const db = this.ensureDb();
+      db.get('SELECT COUNT(*) as total, SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END) as conStock, SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END) as sinStock FROM repuestos', (err, stats: any) => {
         if (err) {
           reject(err);
           return;
         }
 
-        this.db.all('SELECT categoria, COUNT(*) as cantidad FROM repuestos GROUP BY categoria', (err2, categorias) => {
+        db.all('SELECT categoria, COUNT(*) as cantidad FROM repuestos GROUP BY categoria', (err2, categorias) => {
           if (err2) {
             reject(err2);
             return;
@@ -3379,8 +4097,9 @@ export class DatabaseService {
         detallesEncontrados?: number;
       }> = [];
 
+      const db = this.ensureDb();
       // Obtener todas las órdenes con crédito
-      this.db.all(`
+      db.all(`
         SELECT o.id, o.numero, o.numeroCuotas, o.total, o.metodoPago
         FROM ordenes_trabajo o
         WHERE o.metodoPago = 'Crédito' AND o.numeroCuotas IS NOT NULL AND o.numeroCuotas > 0
@@ -3402,7 +4121,7 @@ export class DatabaseService {
           const problemasOrden: string[] = [];
 
           // Verificar cuotas
-          this.db.all('SELECT numeroCuota FROM cuotas_pago WHERE ordenId = ? ORDER BY numeroCuota', [ordenId], (errCuotas, cuotas: any[]) => {
+          db.all('SELECT numeroCuota FROM cuotas_pago WHERE ordenId = ? ORDER BY numeroCuota', [ordenId], (errCuotas, cuotas: any[]) => {
             if (errCuotas) {
               problemasOrden.push(`Error verificando cuotas: ${errCuotas.message}`);
             } else {
@@ -3422,7 +4141,7 @@ export class DatabaseService {
             }
 
             // Verificar detalles
-            this.db.all('SELECT COUNT(*) as count FROM detalles_orden WHERE ordenId = ?', [ordenId], (errDetalles, detallesRow: any) => {
+            db.all('SELECT COUNT(*) as count FROM detalles_orden WHERE ordenId = ?', [ordenId], (errDetalles, detallesRow: any) => {
               if (errDetalles) {
                 problemasOrden.push(`Error verificando detalles: ${errDetalles.message}`);
               } else {
@@ -3469,9 +4188,10 @@ export class DatabaseService {
     return new Promise((resolve, reject) => {
       try {
         console.log('🔧 Iniciando mantenimiento de base de datos...');
+        const db = this.ensureDb();
         
         // Ejecutar ANALYZE para actualizar estadísticas
-        this.db.run('ANALYZE', (err: any) => {
+        db.run('ANALYZE', (err: any) => {
           if (err) {
             console.warn('⚠️ Error ejecutando ANALYZE:', err.message);
           } else {
@@ -3479,7 +4199,7 @@ export class DatabaseService {
           }
           
           // Ejecutar VACUUM para optimizar espacio
-          this.db.run('VACUUM', (err: any) => {
+          db.run('VACUUM', (err: any) => {
             if (err) {
               console.warn('⚠️ Error ejecutando VACUUM:', err.message);
               reject(err);
@@ -3499,7 +4219,7 @@ export class DatabaseService {
   }
 
   async repairIntegrity(): Promise<{deleted: Record<string, number>}> {
-    const db = this.db;
+    const db = this.ensureDb();
     const run = (sql: string) => new Promise<number>((resolve, reject) => {
       db.run(sql, function(this: any, err: any) {
         if (err) reject(err); else resolve(this.changes || 0);
@@ -3523,8 +4243,9 @@ export class DatabaseService {
 
   // Función para insertar solo cotizaciones si faltan
   private insertInitialCotizaciones(): void {
+    const db = this.ensureDb();
     // Primero obtener los IDs de los clientes existentes
-    this.db.all('SELECT id FROM clientes ORDER BY id LIMIT 5', (err, clientes: any[]) => {
+    db.all('SELECT id FROM clientes ORDER BY id LIMIT 5', (err, clientes: any[]) => {
       if (err) {
         console.error('Error obteniendo clientes:', err);
         return;
@@ -3538,7 +4259,7 @@ export class DatabaseService {
       // Obtener los IDs de los vehículos de estos clientes
       const clienteIds = clientes.map(c => c.id);
       
-      this.db.all(`SELECT id FROM vehiculos WHERE clienteId IN (${clienteIds.join(',')}) ORDER BY id LIMIT 5`, (err, vehiculos: any[]) => {
+      db.all(`SELECT id FROM vehiculos WHERE clienteId IN (${clienteIds.join(',')}) ORDER BY id LIMIT 5`, (err, vehiculos: any[]) => {
         if (err) {
           console.error('Error obteniendo vehículos:', err);
           return;
@@ -3554,14 +4275,15 @@ export class DatabaseService {
             return `(${clienteId}, '${marcas[index]}', '${modelos[index]}', 2020, '${patentes[index]}', 'Blanco', 45000, 1)`;
           }).join(',');
 
-          this.db.run(`INSERT INTO vehiculos (clienteId, marca, modelo, año, patente, color, kilometraje, activo) VALUES ${vehiculosToInsert}`, (err) => {
+          const db = this.ensureDb();
+        db.run(`INSERT INTO vehiculos (clienteId, marca, modelo, año, patente, color, kilometraje, activo) VALUES ${vehiculosToInsert}`, (err) => {
             if (err) {
               console.error('Error insertando vehículos:', err);
               return;
             }
             console.log('✅ Vehículos insertados');
             // Reintentar obtener vehículos
-            this.db.all(`SELECT id FROM vehiculos WHERE clienteId IN (${clienteIds.join(',')}) ORDER BY id LIMIT 5`, (err, newVehiculos: any[]) => {
+            db.all(`SELECT id FROM vehiculos WHERE clienteId IN (${clienteIds.join(',')}) ORDER BY id LIMIT 5`, (err, newVehiculos: any[]) => {
               if (!err && newVehiculos.length > 0) {
                 this.insertCotizacionesWithIds(clientes, newVehiculos);
               }
@@ -3591,7 +4313,8 @@ export class DatabaseService {
       return `('COT-2025-${String(index + 1).padStart(3, '0')}', ${cliente.id}, ${vehiculo.id}, '${new Date(Date.now() - (10 - index) * 24 * 60 * 60 * 1000).toISOString()}', '${new Date(Date.now() + (20 + index) * 24 * 60 * 60 * 1000).toISOString()}', '${estados[index]}', '${descripciones[index]}', 'Observaciones de prueba ${index + 1}', ${totals[index]})`;
     }).join(',');
 
-    this.db.run(`
+    const db = this.ensureDb();
+    db.run(`
       INSERT INTO cotizaciones (numero, clienteId, vehiculoId, fecha, validaHasta, estado, descripcion, observaciones, total) 
       VALUES ${cotizacionesSQL}
     `, (err) => {
@@ -3601,7 +4324,7 @@ export class DatabaseService {
       }
 
       // Obtener los IDs de las cotizaciones recién insertadas
-      this.db.all('SELECT id FROM cotizaciones ORDER BY id DESC LIMIT 5', (err, cotizaciones: any[]) => {
+      db.all('SELECT id FROM cotizaciones ORDER BY id DESC LIMIT 5', (err, cotizaciones: any[]) => {
         if (err || !cotizaciones) {
           console.error('Error obteniendo cotizaciones:', err);
           return;
@@ -3618,7 +4341,8 @@ export class DatabaseService {
           return detalles;
         }).join(',');
 
-        this.db.run(`INSERT INTO detalles_cotizacion (cotizacionId, tipo, servicioId, repuestoId, cantidad, precio, subtotal, descripcion) VALUES ${detallesSQL}`, (err) => {
+        const dbDetalles = this.ensureDb();
+        dbDetalles.run(`INSERT INTO detalles_cotizacion (cotizacionId, tipo, servicioId, repuestoId, cantidad, precio, subtotal, descripcion) VALUES ${detallesSQL}`, (err) => {
           if (err) {
             console.error('Error insertando detalles:', err);
             return;
@@ -3649,6 +4373,422 @@ export class DatabaseService {
 
   // Método para cerrar la conexión
   close(): void {
-    this.db.close();
+    if (this.db) {
+      this.ensureDb().close((err: Error | null) => {
+        if (err) {
+          console.error('Error cerrando base de datos:', err);
+        } else {
+          console.log('✅ Base de datos cerrada correctamente');
+        }
+      });
+      this.db = null;
+    }
   }
+
+  // ========== MÓDULO DE CAJA DIARIA ==========
+
+  /**
+   * Obtiene el estado actual de la caja
+   */
+  async getEstadoCaja(): Promise<EstadoCaja | null> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().get(
+        "SELECT * FROM estado_caja WHERE estado = 'abierta' ORDER BY fecha_apertura DESC LIMIT 1",
+        (err, row: any) => {
+          if (err) reject(err);
+          else resolve(row || null);
+        }
+      );
+    });
+  }
+
+  /**
+   * Abre una nueva caja
+   */
+  async abrirCaja(montoInicial: number, observaciones?: string): Promise<EstadoCaja> {
+    return new Promise((resolve, reject) => {
+      const db = this.ensureDb();
+      const dbServiceInstance = this;
+      db.serialize(() => {
+        // Cerrar cualquier caja abierta anterior
+        db.run(
+          "UPDATE estado_caja SET estado = 'cerrada', fecha_cierre = CURRENT_TIMESTAMP WHERE estado = 'abierta'",
+          (err: any) => {
+            if (err) {
+              console.warn('Advertencia al cerrar cajas anteriores:', err);
+            }
+
+            // Crear nueva caja
+            db.run(
+              `INSERT INTO estado_caja (monto_inicial, observaciones, estado)
+               VALUES (?, ?, 'abierta')`,
+              [montoInicial, observaciones || ''],
+              function(err: any) {
+                if (err) {
+                  reject(err);
+                  return;
+                }
+
+                // Obtener la caja creada
+                db.get(
+                  'SELECT * FROM estado_caja WHERE id = ?',
+                  [this.lastID],
+                  (err2: any, row: any) => {
+                    if (err2) reject(err2);
+                    else {
+                      dbServiceInstance.invalidateCache();
+                      resolve(row);
+                    }
+                  }
+                );
+              }
+            );
+          }
+        );
+      });
+    });
+  }
+
+  /**
+   * Cierra la caja actual
+   */
+  async cerrarCaja(montoFinal: number, observaciones?: string): Promise<EstadoCaja> {
+    return new Promise((resolve, reject) => {
+      const db = this.ensureDb();
+      const dbServiceInstance = this;
+      db.serialize(() => {
+        db.get(
+          "SELECT * FROM estado_caja WHERE estado = 'abierta' ORDER BY fecha_apertura DESC LIMIT 1",
+          (err: any, caja: any) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+
+            if (!caja) {
+              reject(new Error('No hay caja abierta'));
+              return;
+            }
+
+            db.run(
+              `UPDATE estado_caja 
+               SET estado = 'cerrada', fecha_cierre = CURRENT_TIMESTAMP, monto_final = ?, observaciones = ?
+               WHERE id = ?`,
+              [montoFinal, observaciones || '', caja.id],
+              function(err2: any) {
+                if (err2) {
+                  reject(err2);
+                  return;
+                }
+
+                // Obtener la caja actualizada
+                db.get(
+                  'SELECT * FROM estado_caja WHERE id = ?',
+                  [caja.id],
+                  (err3: any, row: any) => {
+                    if (err3) reject(err3);
+                    else {
+                      dbServiceInstance.invalidateCache();
+                      resolve(row);
+                    }
+                  }
+                );
+              }
+            );
+          }
+        );
+      });
+    });
+  }
+
+  /**
+   * Registra un movimiento de caja
+   */
+  async registrarMovimientoCaja(movimiento: MovimientoCaja): Promise<MovimientoCaja> {
+    return new Promise((resolve, reject) => {
+      const db = this.ensureDb();
+      const dbServiceInstance = this;
+      db.run(
+        `INSERT INTO movimientos_caja (tipo, monto, descripcion, metodo_pago, fecha, ordenId, caja_abierta)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          movimiento.tipo,
+          movimiento.monto,
+          movimiento.descripcion,
+          movimiento.metodo_pago || null,
+          movimiento.fecha || new Date().toISOString(),
+          movimiento.ordenId || null,
+          movimiento.caja_abierta !== undefined ? movimiento.caja_abierta : 1
+        ],
+        function(err: any) {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          db.get(
+            'SELECT * FROM movimientos_caja WHERE id = ?',
+            [this.lastID],
+            (err2: any, row: any) => {
+              if (err2) reject(err2);
+              else {
+                dbServiceInstance.invalidateCache();
+                resolve(row);
+              }
+            }
+          );
+        }
+      );
+    });
+  }
+
+  /**
+   * Obtiene los movimientos de caja de un día específico
+   */
+  async getMovimientosCajaPorFecha(fecha: string): Promise<MovimientoCaja[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        `SELECT * FROM movimientos_caja 
+         WHERE DATE(fecha) = DATE(?) 
+         ORDER BY fecha DESC`,
+        [fecha],
+        (err, rows: any[]) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
+
+  /**
+   * Obtiene el arqueo del día (totales por método de pago)
+   */
+  async getArqueoCaja(fecha: string): Promise<{
+    totalEfectivo: number;
+    totalTarjeta: number;
+    totalTransferencia: number;
+    totalIngresos: number;
+    totalEgresos: number;
+  }> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        `SELECT 
+          metodo_pago,
+          tipo,
+          SUM(monto) as total
+         FROM movimientos_caja
+         WHERE DATE(fecha) = DATE(?)
+         GROUP BY metodo_pago, tipo`,
+        [fecha],
+        (err, rows: any[]) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          let totalEfectivo = 0;
+          let totalTarjeta = 0;
+          let totalTransferencia = 0;
+          let totalIngresos = 0;
+          let totalEgresos = 0;
+
+          rows.forEach((row: any) => {
+            const monto = row.total || 0;
+            if (row.tipo === 'ingreso') {
+              totalIngresos += monto;
+            } else {
+              totalEgresos += monto;
+            }
+
+            if (row.metodo_pago === 'Efectivo') {
+              totalEfectivo += row.tipo === 'ingreso' ? monto : -monto;
+            } else if (row.metodo_pago === 'Débito' || row.metodo_pago === 'Crédito') {
+              totalTarjeta += row.tipo === 'ingreso' ? monto : -monto;
+            } else if (row.metodo_pago === 'Transferencia') {
+              totalTransferencia += row.tipo === 'ingreso' ? monto : -monto;
+            }
+          });
+
+          resolve({
+            totalEfectivo,
+            totalTarjeta,
+            totalTransferencia,
+            totalIngresos,
+            totalEgresos
+          });
+        }
+      );
+    });
+  }
+
+  // ========== MÓDULO DE COMISIONES DE TÉCNICOS ==========
+
+  /**
+   * Calcula y guarda la comisión de un técnico por una orden
+   */
+  async calcularYGuardarComision(
+    ordenId: number,
+    tecnicoId: number | null,
+    tecnicoNombre: string,
+    porcentajeComision: number
+  ): Promise<ComisionTecnico> {
+    return new Promise((resolve, reject) => {
+      const db = this.ensureDb();
+      const dbServiceInstance = this;
+      
+      // Obtener la orden y calcular monto de mano de obra (solo servicios)
+      db.get(
+        `SELECT 
+          o.total as total_orden,
+          COALESCE(SUM(CASE WHEN d.tipo = 'servicio' THEN d.subtotal ELSE 0 END), 0) as monto_mano_obra
+         FROM ordenes_trabajo o
+         LEFT JOIN detalles_orden d ON o.id = d.ordenId
+         WHERE o.id = ?`,
+        [ordenId],
+        (err: any, orden: any) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          if (!orden) {
+            reject(new Error('Orden no encontrada'));
+            return;
+          }
+
+          const montoManoObra = orden.monto_mano_obra || 0;
+          const montoComision = Math.round(montoManoObra * (porcentajeComision / 100));
+
+          const fecha = new Date();
+          const mesReferencia = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
+
+          db.run(
+            `INSERT INTO comisiones_tecnicos 
+             (ordenId, tecnicoId, tecnicoNombre, monto_mano_obra, porcentaje_comision, monto_comision, mes_referencia)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [ordenId, tecnicoId, tecnicoNombre, montoManoObra, porcentajeComision, montoComision, mesReferencia],
+            function(err2: any) {
+              if (err2) {
+                reject(err2);
+                return;
+              }
+
+              db.get(
+                'SELECT * FROM comisiones_tecnicos WHERE id = ?',
+                [this.lastID],
+                (err3: any, row: any) => {
+                  if (err3) reject(err3);
+                  else {
+                    dbServiceInstance.invalidateCache();
+                    resolve(row);
+                  }
+                }
+              );
+            }
+          );
+        }
+      );
+    });
+  }
+
+  /**
+   * Obtiene el reporte de comisiones por mes
+   */
+  async getReporteComisiones(mes: string): Promise<ComisionTecnico[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        `SELECT * FROM comisiones_tecnicos 
+         WHERE mes_referencia = ? 
+         ORDER BY tecnicoNombre, fecha_calculo`,
+        [mes],
+        (err, rows: any[]) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
+
+  /**
+   * Obtiene el resumen de comisiones por técnico en un mes
+   */
+  async getResumenComisionesPorTecnico(mes: string): Promise<Array<{
+    tecnicoId: number | null;
+    tecnicoNombre: string;
+    totalComisiones: number;
+    cantidadOrdenes: number;
+  }>> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        `SELECT 
+          tecnicoId,
+          tecnicoNombre,
+          SUM(monto_comision) as totalComisiones,
+          COUNT(*) as cantidadOrdenes
+         FROM comisiones_tecnicos
+         WHERE mes_referencia = ?
+         GROUP BY tecnicoId, tecnicoNombre
+         ORDER BY totalComisiones DESC`,
+        [mes],
+        (err, rows: any[]) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
+
+  // ========== MÓDULO DE AGENDA ==========
+
+  /**
+   * Actualiza la fecha programada de una orden (para agenda)
+   */
+  async actualizarFechaProgramada(ordenId: number, fechaProgramada: string | null): Promise<OrdenTrabajo> {
+    return new Promise((resolve, reject) => {
+      const db = this.ensureDb();
+      const dbServiceInstance = this;
+      db.run(
+        'UPDATE ordenes_trabajo SET fechaProgramada = ? WHERE id = ?',
+        [fechaProgramada, ordenId],
+        function(err: any) {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          db.get(
+            'SELECT * FROM ordenes_trabajo WHERE id = ?',
+            [ordenId],
+            (err2: any, row: any) => {
+              if (err2) reject(err2);
+              else {
+                dbServiceInstance.invalidateCache();
+                resolve(row);
+              }
+            }
+          );
+        }
+      );
+    });
+  }
+
+  /**
+   * Obtiene órdenes para la agenda en un rango de fechas
+   */
+  async getOrdenesParaAgenda(fechaInicio: string, fechaFin: string): Promise<OrdenTrabajo[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        `SELECT * FROM ordenes_trabajo 
+         WHERE (fechaProgramada BETWEEN ? AND ?) 
+            OR (fechaIngreso BETWEEN ? AND ?)
+         ORDER BY COALESCE(fechaProgramada, fechaIngreso) ASC`,
+        [fechaInicio, fechaFin, fechaInicio, fechaFin],
+        (err, rows: any[]) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
+
 }

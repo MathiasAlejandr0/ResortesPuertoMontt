@@ -1,6 +1,16 @@
 /**
- * Sistema de logging persistente para producción
+ * Sistema de logging persistente para producción con sanitización de PII
  * Guarda logs en archivos para análisis posterior
+ * 
+ * Implementa PII Redactor para cumplir con GDPR/ISO 27001:
+ * - Detecta y redacta RUTs chilenos
+ * - Detecta y redacta emails
+ * - Detecta y redacta contraseñas
+ * - Detecta y redacta números de teléfono
+ * 
+ * @author Mathias Jara
+ * @version 1.1.2
+ * @compliance GDPR, ISO 27001, OWASP
  */
 
 import * as fs from 'fs';
@@ -16,6 +26,114 @@ interface LogEntry {
   data?: any;
 }
 
+/**
+ * PII Redactor - Detecta y redacta información personal identificable
+ * 
+ * Patrones detectados:
+ * - RUTs chilenos: XX.XXX.XXX-X o XXXXXXXX-X
+ * - Emails: user@domain.com
+ * - Contraseñas: password, pass, pwd, secret, token
+ * - Teléfonos: +56 9 XXXX XXXX, 9XXXXXXXX
+ */
+class PIIRedactor {
+  // Patrón para RUT chileno: XX.XXX.XXX-X o XXXXXXXX-X
+  private readonly rutPattern = /\b\d{1,2}\.?\d{3}\.?\d{3}[-]?\d{1}\b/g;
+  
+  // Patrón para email
+  private readonly emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+  
+  // Patrón para teléfonos chilenos
+  private readonly phonePattern = /(\+?56\s?)?[9]\s?\d{4}\s?\d{4}\b/g;
+  
+  // Palabras clave que indican contraseñas/tokens
+  private readonly passwordKeywords = [
+    /password['":\s]*[:=]\s*['"]?([^'",\s}]+)/gi,
+    /pass['":\s]*[:=]\s*['"]?([^'",\s}]+)/gi,
+    /pwd['":\s]*[:=]\s*['"]?([^'",\s}]+)/gi,
+    /secret['":\s]*[:=]\s*['"]?([^'",\s}]+)/gi,
+    /token['":\s]*[:=]\s*['"]?([^'",\s}]+)/gi,
+    /api[_-]?key['":\s]*[:=]\s*['"]?([^'",\s}]+)/gi,
+    /auth[_-]?token['":\s]*[:=]\s*['"]?([^'",\s}]+)/gi,
+  ];
+
+  /**
+   * Redacta PII de un string
+   */
+  redact(text: string): string {
+    if (!text || typeof text !== 'string') {
+      return text;
+    }
+
+    let redacted = text;
+
+    // Redactar RUTs
+    redacted = redacted.replace(this.rutPattern, '[RUT_REDACTED]');
+
+    // Redactar emails
+    redacted = redacted.replace(this.emailPattern, '[EMAIL_REDACTED]');
+
+    // Redactar teléfonos
+    redacted = redacted.replace(this.phonePattern, '[PHONE_REDACTED]');
+
+    // Redactar contraseñas y tokens
+    for (const pattern of this.passwordKeywords) {
+      redacted = redacted.replace(pattern, (match, value) => {
+        return match.replace(value, '[REDACTED]');
+      });
+    }
+
+    return redacted;
+  }
+
+  /**
+   * Redacta PII de un objeto (recursivo)
+   */
+  redactObject(obj: any): any {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+
+    if (typeof obj === 'string') {
+      return this.redact(obj);
+    }
+
+    if (typeof obj === 'number' || typeof obj === 'boolean') {
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.redactObject(item));
+    }
+
+    if (typeof obj === 'object') {
+      const redacted: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        // Redactar valores de campos sensibles
+        const lowerKey = key.toLowerCase();
+        if (
+          lowerKey.includes('password') ||
+          lowerKey.includes('pass') ||
+          lowerKey.includes('pwd') ||
+          lowerKey.includes('secret') ||
+          lowerKey.includes('token') ||
+          lowerKey.includes('key') ||
+          lowerKey.includes('rut') ||
+          lowerKey.includes('email') ||
+          lowerKey.includes('telefono') ||
+          lowerKey.includes('phone')
+        ) {
+          redacted[key] = '[REDACTED]';
+        } else {
+          redacted[key] = this.redactObject(value);
+        }
+      }
+      return redacted;
+    }
+
+    return obj;
+  }
+}
+
 class PersistentLogger {
   private logDir: string;
   private logFile: string;
@@ -23,6 +141,7 @@ class PersistentLogger {
   private maxLogSize: number = 10 * 1024 * 1024; // 10 MB
   private maxLogFiles: number = 5; // Mantener últimos 5 archivos
   private minLogLevel: LogLevel;
+  private piiRedactor: PIIRedactor;
   
   // Niveles de log ordenados por prioridad
   private readonly logLevels: Record<LogLevel, number> = {
@@ -37,6 +156,7 @@ class PersistentLogger {
     this.logDir = path.join(userDataPath, 'logs');
     this.logFile = path.join(this.logDir, `app-${this.getDateString()}.log`);
     this.errorLogFile = path.join(this.logDir, `error-${this.getDateString()}.log`);
+    this.piiRedactor = new PIIRedactor();
 
     // Determinar nivel mínimo de log según entorno
     // En producción: solo info, warn, error (no debug)
@@ -116,9 +236,13 @@ class PersistentLogger {
       // Rotar si es necesario
       this.rotateLogIfNeeded(logPath);
 
-      // Formatear entrada
-      const dataStr = entry.data ? ` | Data: ${JSON.stringify(entry.data)}` : '';
-      const logLine = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}${dataStr}\n`;
+      // Sanitizar mensaje y datos antes de escribir (PII Redaction)
+      const sanitizedMessage = this.piiRedactor.redact(entry.message);
+      const sanitizedData = entry.data ? this.piiRedactor.redactObject(entry.data) : null;
+      
+      // Formatear entrada con datos sanitizados
+      const dataStr = sanitizedData ? ` | Data: ${JSON.stringify(sanitizedData)}` : '';
+      const logLine = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${sanitizedMessage}${dataStr}\n`;
 
       // Escribir a archivo (append)
       fs.appendFileSync(logPath, logLine, 'utf8');

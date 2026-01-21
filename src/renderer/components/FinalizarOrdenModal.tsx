@@ -150,11 +150,11 @@ export default function FinalizarOrdenModal({
                 onClick={() => handleMetodoPagoChange('Efectivo')}
                 className={`flex flex-col items-center justify-center p-4 border-2 rounded-lg transition-all ${
                   metodoPago === 'Efectivo'
-                    ? 'border-blue-500 bg-blue-50'
+                    ? 'border-red-500 bg-red-50'
                     : 'border-gray-300 hover:border-gray-400'
                 }`}
               >
-                <DollarSign className={`h-8 w-8 mb-2 ${metodoPago === 'Efectivo' ? 'text-blue-500' : 'text-gray-400'}`} />
+                <DollarSign className={`h-8 w-8 mb-2 ${metodoPago === 'Efectivo' ? 'text-red-500' : 'text-gray-400'}`} />
                 <span className="font-medium">Efectivo</span>
               </button>
               <button
@@ -162,11 +162,11 @@ export default function FinalizarOrdenModal({
                 onClick={() => handleMetodoPagoChange('Débito')}
                 className={`flex flex-col items-center justify-center p-4 border-2 rounded-lg transition-all ${
                   metodoPago === 'Débito'
-                    ? 'border-blue-500 bg-blue-50'
+                    ? 'border-red-500 bg-red-50'
                     : 'border-gray-300 hover:border-gray-400'
                 }`}
               >
-                <CreditCard className={`h-8 w-8 mb-2 ${metodoPago === 'Débito' ? 'text-blue-500' : 'text-gray-400'}`} />
+                <CreditCard className={`h-8 w-8 mb-2 ${metodoPago === 'Débito' ? 'text-red-500' : 'text-gray-400'}`} />
                 <span className="font-medium">Débito</span>
               </button>
               <button
@@ -174,11 +174,11 @@ export default function FinalizarOrdenModal({
                 onClick={() => handleMetodoPagoChange('Crédito')}
                 className={`flex flex-col items-center justify-center p-4 border-2 rounded-lg transition-all ${
                   metodoPago === 'Crédito'
-                    ? 'border-blue-500 bg-blue-50'
+                    ? 'border-red-500 bg-red-50'
                     : 'border-gray-300 hover:border-gray-400'
                 }`}
               >
-                <CreditCard className={`h-8 w-8 mb-2 ${metodoPago === 'Crédito' ? 'text-blue-500' : 'text-gray-400'}`} />
+                <CreditCard className={`h-8 w-8 mb-2 ${metodoPago === 'Crédito' ? 'text-red-500' : 'text-gray-400'}`} />
                 <span className="font-medium">Crédito</span>
               </button>
             </div>
@@ -197,7 +197,7 @@ export default function FinalizarOrdenModal({
                   max="12"
                   value={numeroCuotas}
                   onChange={(e) => handleNumeroCuotasChange(parseInt(e.target.value) || 1)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
               </div>
 
@@ -213,7 +213,7 @@ export default function FinalizarOrdenModal({
                         type="date"
                         value={fecha}
                         onChange={(e) => handleFechaPagoChange(index, e.target.value)}
-                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                       />
                     </div>
                   ))}

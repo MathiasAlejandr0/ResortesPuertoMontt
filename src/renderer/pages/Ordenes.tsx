@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useDeferredValue, startTransition } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import StatCard from '../components/StatCard';
+import { RichTable, Column } from '../components/RichTable';
 import OrdenFormMejorado from '../components/OrdenFormMejorado';
 import VentaForm from '../components/VentaForm';
 import OrdenInterna from '../components/OrdenInterna';
@@ -30,14 +29,17 @@ import {
   Mail,
   DollarSign,
   FileText,
-  X,
-  ShoppingCart
+  X
 } from 'lucide-react';
 import { OrdenTrabajo, Cliente, Vehiculo, Servicio, Repuesto, Cotizacion } from '../types';
+import { useNegocioInfo } from '../hooks/useNegocioInfo';
 
 export default function OrdenesPage() {
   // Usar el contexto para acceder a los datos
   const { ordenes: initialOrdenes, clientes, vehiculos, servicios, repuestos, cotizaciones, refreshOrdenes } = useApp();
+  
+  // Obtener información del negocio desde la configuración
+  const { nombreTaller, telefonoTaller, emailTaller, rutTaller, direccionTaller, sitioWebTaller } = useNegocioInfo();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('todos');
   // Usar órdenes del contexto directamente
@@ -115,6 +117,19 @@ export default function OrdenesPage() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterStatus]);
+
+  // Listener para abrir modal de nueva orden desde el sidebar
+  useEffect(() => {
+    const handleNuevaOrdenEvent = () => {
+      setIsFormOpen(true);
+    };
+    
+    window.addEventListener('app:nueva-orden', handleNuevaOrdenEvent);
+    
+    return () => {
+      window.removeEventListener('app:nueva-orden', handleNuevaOrdenEvent);
+    };
+  }, []);
 
   // Funciones CRUD para órdenes de trabajo
   const handleViewOrden = (orden: OrdenTrabajo) => {
@@ -523,6 +538,15 @@ export default function OrdenesPage() {
     }
   };
 
+  const handleSaveOrdenNuevaWrapper = async (
+    data: OrdenTrabajo | Cotizacion,
+    detalles?: Array<{ tipo: 'servicio' | 'repuesto'; servicioId?: number; repuestoId?: number; cantidad: number; precio: number; subtotal: number; descripcion: string }>
+  ) => {
+    if ('fechaIngreso' in data) {
+      await handleSaveOrdenNueva(data, detalles);
+    }
+  };
+
   const handleEnviarWhatsApp = (orden: OrdenTrabajo) => {
     setOrdenParaEnviar(orden);
     setIsPhoneModalOpen(true);
@@ -700,6 +724,49 @@ export default function OrdenesPage() {
           }
         }
 
+        // Registrar pago en caja si la caja está abierta (solo para efectivo, débito o crédito con pago inmediato)
+        if (metodoPago !== 'Crédito' || (metodoPago === 'Crédito' && fechaPago)) {
+          try {
+            const estadoCaja = await window.electronAPI.getEstadoCaja();
+            if (estadoCaja && estadoCaja.estado === 'abierta') {
+              const metodoPagoCaja = metodoPago === 'Crédito' ? 'Transferencia' : metodoPago;
+              await window.electronAPI.registrarMovimientoCaja({
+                tipo: 'ingreso',
+                monto: orden.total,
+                descripcion: `Pago de orden ${orden.numero}`,
+                metodo_pago: metodoPagoCaja,
+                fecha: fechaPago || new Date().toISOString(),
+                ordenId: savedOrden.id,
+                caja_abierta: true
+              });
+              Logger.log('✅ Pago registrado en caja');
+            }
+          } catch (error: any) {
+            Logger.warn('⚠️ No se pudo registrar el pago en caja:', error.message);
+            // No fallar la finalización si hay error en caja
+          }
+        }
+
+        // Calcular y guardar comisión del técnico si hay técnico asignado
+        if (orden.tecnicoAsignado) {
+          try {
+            // Obtener porcentaje de comisión del técnico (por defecto 40% si no está configurado)
+            // Por ahora usamos 40% como valor por defecto
+            const porcentajeComision = 40; // TODO: Obtener del usuario/tecnico
+            
+            await window.electronAPI.calcularYGuardarComision(
+              savedOrden.id!,
+              null, // tecnicoId - por ahora null ya que tecnicoAsignado es solo texto
+              orden.tecnicoAsignado,
+              porcentajeComision
+            );
+            Logger.log('✅ Comisión calculada y guardada');
+          } catch (error: any) {
+            Logger.warn('⚠️ No se pudo calcular la comisión:', error.message);
+            // No fallar la finalización si hay error en comisión
+          }
+        }
+
         Logger.log('✅ Orden finalizada exitosamente:', savedOrden.id);
         await refreshOrdenes();
         notify.success('Orden de trabajo finalizada exitosamente');
@@ -754,6 +821,147 @@ export default function OrdenesPage() {
         return <Badge className="bg-gray-400 text-white text-xs">Media</Badge>;
     }
   };
+
+  // Preparar datos para RichTable
+  const ordenesTableData = useMemo(() => {
+    return filteredOrdenes.map(orden => {
+      const cliente = orden.clienteId ? clientesById.get(orden.clienteId) : null;
+      const vehiculo = orden.vehiculoId ? vehiculosById.get(orden.vehiculoId) : null;
+      return {
+        ...orden,
+        clienteNombre: cliente?.nombre || 'Cliente no encontrado',
+        vehiculoInfo: vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.año}` : 'Vehículo no encontrado',
+      };
+    });
+  }, [filteredOrdenes, clientesById, vehiculosById]);
+
+  // Columnas para RichTable
+  const columns: Column<typeof ordenesTableData[0]>[] = useMemo(() => [
+    {
+      key: 'numero',
+      header: 'ID',
+      sortable: true,
+      accessor: (row) => (
+        <span className="font-semibold text-foreground">
+          {row.numero || `OT-${row.id}`}
+        </span>
+      ),
+    },
+    {
+      key: 'cliente',
+      header: 'Cliente / Vehículo',
+      sortable: true,
+      accessor: (row) => (
+        <div>
+          <div className="font-semibold text-foreground">
+            {row.clienteNombre}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            {row.vehiculoInfo}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'descripcion',
+      header: 'Descripción',
+      sortable: true,
+      accessor: (row) => (
+        <span className="text-sm text-foreground">
+          {row.descripcion || 'Sin descripción'}
+        </span>
+      ),
+    },
+    {
+      key: 'prioridad',
+      header: 'Prioridad',
+      sortable: true,
+      accessor: (row) => (
+        <select
+          value={row.prioridad || 'Normal'}
+          onChange={async (e) => {
+            const nuevaPrioridad = e.target.value;
+            try {
+              const ordenActualizada = { ...row, prioridad: nuevaPrioridad };
+              const resp = await window.electronAPI.saveOrdenTrabajo(ordenActualizada);
+              if (resp?.success !== false) {
+                await refreshOrdenes();
+                notify.success('Prioridad actualizada');
+              } else {
+                notify.error('Error', 'No se pudo actualizar la prioridad');
+              }
+            } catch (error) {
+              Logger.error('Error actualizando prioridad:', error);
+              notify.error('Error', 'No se pudo actualizar la prioridad');
+            }
+          }}
+          className="px-2 py-1 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <option value="Baja">Baja</option>
+          <option value="Normal">Normal</option>
+          <option value="Alta">Alta</option>
+          <option value="Urgente">Urgente</option>
+        </select>
+      ),
+    },
+    {
+      key: 'estado',
+      header: 'Estado',
+      sortable: true,
+      accessor: (row) => (
+        <select
+          value={row.estado || 'Pendiente'}
+          onChange={async (e) => {
+            const nuevoEstado = e.target.value;
+            try {
+              const ordenActualizada = { ...row, estado: nuevoEstado };
+              const resp = await window.electronAPI.saveOrdenTrabajo(ordenActualizada);
+              if (resp?.success !== false) {
+                await refreshOrdenes();
+                notify.success('Estado actualizado');
+              } else {
+                notify.error('Error', 'No se pudo actualizar el estado');
+              }
+            } catch (error) {
+              Logger.error('Error actualizando estado:', error);
+              notify.error('Error', 'No se pudo actualizar el estado');
+            }
+          }}
+          className="px-2 py-1 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <option value="Pendiente">Pendiente</option>
+          <option value="En Progreso">En Progreso</option>
+          <option value="Completada">Completada</option>
+          <option value="Cancelada">Cancelada</option>
+        </select>
+      ),
+    },
+    {
+      key: 'total',
+      header: 'Costo Est.',
+      sortable: true,
+      accessor: (row) => (
+        <span className="font-semibold text-foreground">
+          ${row.total?.toLocaleString() || '0'}
+        </span>
+      ),
+    },
+    {
+      key: 'tecnicoAsignado',
+      header: 'Asignado',
+      sortable: true,
+      accessor: (row) => (
+        <div className="flex items-center gap-2">
+          <User className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-foreground">
+            {row.tecnicoAsignado || 'Sin asignar'}
+          </span>
+        </div>
+      ),
+    },
+  ], [refreshOrdenes]);
 
   // Función para obtener estado visual
   const getEstadoBadge = (estado: string) => {
@@ -833,11 +1041,25 @@ export default function OrdenesPage() {
     );
   }
 
+  // Si el formulario está abierto, mostrar solo el formulario (estilo Dirup)
+  if (isFormOpen) {
+    return (
+      <div className="flex flex-col h-full">
+        <OrdenFormMejorado
+          isOpen={isFormOpen}
+          onClose={() => setIsFormOpen(false)}
+          onSave={handleSaveOrdenNuevaWrapper}
+          fullPage={true}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-8 p-6 lg:p-8">
+    <div className="flex flex-col h-full">
       {/* Manejo de errores */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 m-6">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-red-600" />
             <div>
@@ -855,330 +1077,104 @@ export default function OrdenesPage() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-col gap-3 pb-2 border-b border-border">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight text-card-foreground">Órdenes de Trabajo</h1>
-            <p className="text-base text-muted-foreground mt-2">Gestiona las órdenes de servicio del taller</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={handleNewVenta}
-              className="btn-primary flex items-center gap-2 bg-green-600 hover:bg-green-700"
-            >
-              <ShoppingCart className="h-5 w-5" />
-              Nueva Venta
-            </button>
-            <button 
-              onClick={handleNewOrden}
-              className="btn-primary flex items-center gap-2"
-            >
-              <Plus className="h-5 w-5" />
-              Nueva Orden
-            </button>
-          </div>
+      {/* Contenido principal */}
+      <div className="flex-1 overflow-y-auto bg-white p-6">
+        {/* Barra de búsqueda, filtros y botón Nuevo */}
+        <div className="mb-4 flex items-center gap-3">
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+          >
+            <option value="todos">Todos los estados</option>
+            <option value="Pendiente">Pendiente</option>
+            <option value="En Progreso">En Progreso</option>
+            <option value="Completada">Completada</option>
+            <option value="Cancelada">Cancelada</option>
+          </select>
+          <input
+            type="text"
+            placeholder="Buscar"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
+          />
+          <button className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+            Por defecto
+          </button>
+          <button className="p-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors">
+            <Search className="h-5 w-5" />
+          </button>
+          <button 
+            onClick={handleNewOrden}
+            className="ml-auto px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded transition-colors flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo
+          </button>
+        </div>
+
+        {/* Lista de Órdenes */}
+        <div className="space-y-4">
+
+        <RichTable
+          data={ordenesTableData}
+          columns={columns}
+          searchable={false}
+          onView={(row) => handleViewOrden(row)}
+          onEdit={(row) => handleEditOrden(row)}
+          onDelete={(row) => row.id && handleDeleteOrden(row.id)}
+          customActions={(row) => (
+            <div className="flex items-center gap-1">
+              <button 
+                onClick={() => handleVerVersionInterna(row)}
+                className="p-1.5 hover:bg-muted rounded transition-colors"
+                title="Ver versión interna (con precios)"
+              >
+                <DollarSign className="h-4 w-4 text-green-600" />
+              </button>
+              <button 
+                onClick={() => handleVerVersionCliente(row)}
+                className="p-1.5 hover:bg-muted rounded transition-colors"
+                title="Ver versión cliente (sin precios)"
+              >
+                <FileText className="h-4 w-4 text-red-600" />
+              </button>
+              <button 
+                onClick={() => handleEnviarWhatsApp(row)}
+                className="p-1.5 hover:bg-muted rounded transition-colors"
+                title="Enviar por WhatsApp"
+              >
+                <MessageSquare className="h-4 w-4 text-green-600" />
+              </button>
+              <button 
+                onClick={() => handleEnviarEmail(row)}
+                className="p-1.5 hover:bg-muted rounded transition-colors"
+                title="Enviar por Email"
+              >
+                <Mail className="h-4 w-4 text-red-600" />
+              </button>
+              {row.estado === 'En Progreso' && (
+                <button 
+                  onClick={() => handleAbrirFinalizarModal(row)}
+                  className="p-1.5 hover:bg-muted rounded transition-colors"
+                  title="Finalizar orden"
+                >
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                </button>
+              )}
+            </div>
+          )}
+          emptyMessage={ordenes.length === 0 ? 'No hay órdenes de trabajo registradas' : 'No se encontraron órdenes con los filtros aplicados'}
+        />
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid gap-6 md:grid-cols-4">
-        <StatCard
-          title="Total"
-          value={totalOrdenes.toString()}
-          icon={Wrench}
-          iconColor="icon-red"
-        />
-        <StatCard
-          title="Pendientes"
-          value={ordenesPendientes.toString()}
-          icon={Clock}
-          iconColor="icon-blue"
-        />
-        <StatCard
-          title="En Progreso"
-          value={ordenesEnProgreso.toString()}
-          icon={Wrench}
-          iconColor="icon-blue"
-        />
-        <StatCard
-          title="Completadas"
-          value={ordenesCompletadas.toString()}
-          icon={CheckCircle}
-          iconColor="icon-green"
-        />
-      </div>
-
-      {/* Lista de Órdenes */}
-      <Card className="shadow-sm border border-border">
-        <CardHeader className="pb-4">
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-xl font-bold text-card-foreground">Lista de Órdenes</CardTitle>
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Buscar por ID, cliente o descripción..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    // Actualizar inmediatamente para que el usuario vea los caracteres
-                    // El filtrado se hará con deferredSearchTerm (no bloquea)
-                    setSearchTerm(e.target.value);
-                  }}
-                  className="pl-10 pr-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200 w-80"
-                />
-              </div>
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                title="Filtrar por estado"
-                aria-label="Filtrar por estado"
-                className="px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
-              >
-                <option value="todos">Todos</option>
-                <option value="Pendiente">Pendientes</option>
-                <option value="En Progreso">En Progreso</option>
-                <option value="Completada">Completadas</option>
-                <option value="Cancelada">Canceladas</option>
-              </select>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">ID</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Cliente / Vehículo</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Descripción</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Prioridad</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Estado</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Costo Est.</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Asignado</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentOrdenes.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-8 text-muted-foreground">
-                      {ordenes.length === 0 ? 'No hay órdenes de trabajo registradas' : 'No se encontraron órdenes con los filtros aplicados'}
-                    </td>
-                  </tr>
-                ) : (
-                  currentOrdenes.map((orden) => {
-                    const cliente = clientes.find(c => c.id === orden.clienteId);
-                    const vehiculo = vehiculos.find(v => v.id === orden.vehiculoId);
-                    
-                    return (
-                      <tr key={orden.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                        <td className="py-4 px-4">
-                          <span className="font-semibold text-card-foreground">
-                            {orden.numero || `OT-${orden.id}`}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div>
-                            <div className="font-semibold text-card-foreground">
-                              {cliente?.nombre || 'Cliente no encontrado'}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              {vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} ${vehiculo.año}` : 'Vehículo no encontrado'}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="text-sm text-card-foreground">
-                            {orden.descripcion || 'Sin descripción'}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <select
-                            value={orden.prioridad || 'Normal'}
-                            onChange={async (e) => {
-                              const nuevaPrioridad = e.target.value;
-                              try {
-                                const ordenActualizada = { ...orden, prioridad: nuevaPrioridad };
-                                const resp = await window.electronAPI.saveOrdenTrabajo(ordenActualizada);
-                                if (resp?.success !== false) {
-                                  await refreshOrdenes();
-                                  notify.success('Prioridad actualizada');
-                                } else {
-                                  notify.error('Error', 'No se pudo actualizar la prioridad');
-                                }
-                              } catch (error) {
-                                Logger.error('Error actualizando prioridad:', error);
-                                notify.error('Error', 'No se pudo actualizar la prioridad');
-                              }
-                            }}
-                            className="px-2 py-1 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <option value="Baja">Baja</option>
-                            <option value="Normal">Normal</option>
-                            <option value="Alta">Alta</option>
-                            <option value="Urgente">Urgente</option>
-                          </select>
-                        </td>
-                        <td className="py-4 px-4">
-                          <select
-                            value={orden.estado || 'Pendiente'}
-                            onChange={async (e) => {
-                              const nuevoEstado = e.target.value;
-                              try {
-                                const ordenActualizada = { ...orden, estado: nuevoEstado };
-                                const resp = await window.electronAPI.saveOrdenTrabajo(ordenActualizada);
-                                if (resp?.success !== false) {
-                                  await refreshOrdenes();
-                                  notify.success('Estado actualizado');
-                                } else {
-                                  notify.error('Error', 'No se pudo actualizar el estado');
-                                }
-                              } catch (error) {
-                                Logger.error('Error actualizando estado:', error);
-                                notify.error('Error', 'No se pudo actualizar el estado');
-                              }
-                            }}
-                            className="px-2 py-1 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <option value="Pendiente">Pendiente</option>
-                            <option value="En Progreso">En Progreso</option>
-                            <option value="Completada">Completada</option>
-                            <option value="Cancelada">Cancelada</option>
-                          </select>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="font-semibold text-card-foreground">
-                            ${orden.total?.toLocaleString() || '0'}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm text-card-foreground">
-                              {orden.tecnicoAsignado || 'Sin asignar'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="flex items-center gap-2">
-                            <button 
-                              onClick={() => handleViewOrden(orden)}
-                              className="p-1 hover:bg-muted rounded transition-colors"
-                              title="Ver orden"
-                            >
-                              <Eye className="h-4 w-4 text-muted-foreground" />
-                            </button>
-                            <button 
-                              onClick={() => handleVerVersionInterna(orden)}
-                              className="p-1 hover:bg-muted rounded transition-colors"
-                              title="Ver versión interna (con precios)"
-                            >
-                              <DollarSign className="h-4 w-4 text-green-600" />
-                            </button>
-                            <button 
-                              onClick={() => handleVerVersionCliente(orden)}
-                              className="p-1 hover:bg-muted rounded transition-colors"
-                              title="Ver versión cliente (sin precios)"
-                            >
-                              <FileText className="h-4 w-4 text-blue-600" />
-                            </button>
-                            <button 
-                              onClick={() => handleEditOrden(orden)}
-                              className="p-1 hover:bg-muted rounded transition-colors"
-                              title="Editar orden"
-                            >
-                              <Edit className="h-4 w-4 text-muted-foreground" />
-                            </button>
-                            <button 
-                              onClick={() => handleEnviarWhatsApp(orden)}
-                              className="p-1 hover:bg-muted rounded transition-colors"
-                              title="Enviar por WhatsApp"
-                            >
-                              <MessageSquare className="h-4 w-4 text-green-600" />
-                            </button>
-                            <button 
-                              onClick={() => handleEnviarEmail(orden)}
-                              className="p-1 hover:bg-muted rounded transition-colors"
-                              title="Enviar por Email"
-                            >
-                              <Mail className="h-4 w-4 text-blue-600" />
-                            </button>
-                            {orden.estado === 'En Progreso' && (
-                              <button 
-                                onClick={() => handleAbrirFinalizarModal(orden)}
-                                className="p-1 hover:bg-muted rounded transition-colors"
-                                title="Finalizar orden"
-                              >
-                                <CheckCircle className="h-4 w-4 text-green-600" />
-                              </button>
-                            )}
-                            <button 
-                              onClick={() => orden.id && handleDeleteOrden(orden.id)}
-                              className="p-1 hover:bg-muted rounded transition-colors"
-                              title="Eliminar orden"
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-          
-          {/* Controles de Paginación */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
-              <div className="text-sm text-gray-600">
-                Mostrando {startIndex + 1} a {Math.min(endIndex, filteredOrdenes.length)} de {filteredOrdenes.length} órdenes
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Anterior
-                </button>
-                
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 text-sm border rounded ${
-                      currentPage === page
-                        ? 'bg-red-600 text-white border-red-600'
-                        : 'border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ))}
-                
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Siguiente
-                </button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
       {/* Formulario Inteligente - Ahora usa el contexto */}
       <OrdenFormMejorado
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
-        onSave={handleSaveOrdenNueva}
+        onSave={handleSaveOrdenNuevaWrapper}
       />
 
       {/* Formulario de Venta */}
@@ -1254,9 +1250,12 @@ export default function OrdenesPage() {
                 repuestos={repuestosInternos}
                 descripcionTrabajo={ordenSeleccionadaParaVer.descripcion}
                 observaciones={ordenSeleccionadaParaVer.observaciones}
-                nombreTaller="Resortes Puerto Montt"
-                telefonoTaller="+56 9 1234 5678"
-                emailTaller="info@resortespuertomontt.cl"
+                nombreTaller={nombreTaller}
+                telefonoTaller={telefonoTaller}
+                emailTaller={emailTaller}
+                rutTaller={rutTaller}
+                direccionTaller={direccionTaller}
+                sitioWebTaller={sitioWebTaller}
               />
             </div>
           </div>
@@ -1288,9 +1287,12 @@ export default function OrdenesPage() {
                 repuestos={[]} // Aquí se cargarían los repuestos de la orden
                 descripcionTrabajo={ordenSeleccionadaParaVer.descripcion}
                 observaciones={ordenSeleccionadaParaVer.observaciones}
-                nombreTaller="Resortes Puerto Montt"
-                telefonoTaller="+56 9 1234 5678"
-                emailTaller="info@resortespuertomontt.cl"
+                nombreTaller={nombreTaller}
+                telefonoTaller={telefonoTaller}
+                emailTaller={emailTaller}
+                rutTaller={rutTaller}
+                direccionTaller={direccionTaller}
+                sitioWebTaller={sitioWebTaller}
               />
             </div>
           </div>

@@ -79,7 +79,7 @@ export default function OCRModal({ isOpen, onClose, onProcessOCR }: OCRModalProp
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors">
                 <input
                   type="file"
-                  accept="image/*"
+                  accept=".pdf,.jpg,.jpeg,.png,.bmp,image/*"
                   onChange={handleFileSelect}
                   className="hidden"
                   id="ocr-file-input"
@@ -91,7 +91,7 @@ export default function OCRModal({ isOpen, onClose, onProcessOCR }: OCRModalProp
                 >
                   {selectedFile ? (
                     <div className="flex flex-col items-center gap-2">
-                      <FileText className="h-12 w-12 text-blue-600" />
+                      <FileText className="h-12 w-12 text-red-600" />
                       <p className="text-sm font-medium text-gray-900">{selectedFile.name}</p>
                       <p className="text-xs text-gray-500">
                         {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
@@ -105,7 +105,7 @@ export default function OCRModal({ isOpen, onClose, onProcessOCR }: OCRModalProp
                           Haz clic para seleccionar una imagen
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
-                          Formatos soportados: JPG, PNG, PDF
+                          Formatos soportados: PDF (digital), JPG, PNG (OCR)
                         </p>
                       </div>
                     </div>
@@ -126,19 +126,19 @@ export default function OCRModal({ isOpen, onClose, onProcessOCR }: OCRModalProp
             <CardContent>
               <ul className="text-sm text-gray-600 space-y-2">
                 <li className="flex items-start gap-2">
-                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-red-600 font-bold">•</span>
                   <span>Sube una imagen clara de la factura</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-red-600 font-bold">•</span>
                   <span>El sistema extraerá automáticamente los repuestos</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-red-600 font-bold">•</span>
                   <span>Los items se agregarán al inventario</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-blue-600 font-bold">•</span>
+                  <span className="text-red-600 font-bold">•</span>
                   <span>Puedes revisar y editar los datos antes de guardar</span>
                 </li>
               </ul>
@@ -158,7 +158,7 @@ export default function OCRModal({ isOpen, onClose, onProcessOCR }: OCRModalProp
             <Button
               onClick={handleProcessOCR}
               disabled={!selectedFile || isProcessing}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center gap-2"
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-2"
             >
               {isProcessing ? (
                 <>

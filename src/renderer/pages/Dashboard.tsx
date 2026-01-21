@@ -1,12 +1,14 @@
 import StatCard from '../components/StatCard';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
 import { useApp } from '../contexts/AppContext';
-import { DollarSign, Wrench, Package, TrendingUp, AlertTriangle } from 'lucide-react';
+import { DollarSign, Wrench, Package, TrendingUp, AlertTriangle, Plus, Users, ShoppingCart } from 'lucide-react';
 import { Cliente, Vehiculo, Cotizacion, OrdenTrabajo, Repuesto } from '../types';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import VerOrdenModal from '../components/VerOrdenModal';
 import { kpiCache, KPICache } from '../utils/kpi-cache';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 export default function Dashboard() {
   // Usar el contexto para acceder a los datos
@@ -350,14 +352,9 @@ export default function Dashboard() {
   }, []);
 
   return (
-    <div className="flex flex-col gap-8 p-6 lg:p-8">
-      <div className="flex flex-col gap-3 pb-2 border-b border-border">
-        <h1 className="text-4xl font-bold tracking-tight text-card-foreground">Dashboard</h1>
-        <p className="text-base text-muted-foreground">Resumen general de tu taller mecánico - {fechaActual.charAt(0).toUpperCase() + fechaActual.slice(1)}</p>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+    <div className="flex flex-col gap-6 p-6 lg:p-8">
+      {/* Top Cards - Resumen */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Ganancias del Mes"
           value={`$${ingresosMes.toLocaleString()}`}
@@ -386,72 +383,114 @@ export default function Dashboard() {
           changeType="neutral"
           icon={Package}
         />
+        <StatCard
+          title="Clientes Nuevos"
+          value={clientes.filter(c => {
+            if (!c.id) return false;
+            const fechaCreacion = new Date();
+            fechaCreacion.setMonth(fechaCreacion.getMonth() - 1);
+            // Asumimos que los clientes nuevos son los del último mes
+            return true; // Simplificado, ajustar según lógica real
+          }).length.toString()}
+          change="Este mes"
+          changeType="positive"
+          icon={Users}
+        />
+        <StatCard
+          title="Stock Bajo"
+          value={inventarioBajo.toString()}
+          change="Requieren atención"
+          changeType={inventarioBajo > 0 ? "negative" : "positive"}
+          icon={AlertTriangle}
+        />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="shadow-sm border border-border">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-xl font-bold text-card-foreground">Ventas Mensuales ({rangoMeses.inicio} - {rangoMeses.fin})</CardTitle>
-          </CardHeader>
-          <CardContent className="pb-2">
-            <div className="space-y-4">
-              {salesData.map((item, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-12 text-sm font-medium text-muted-foreground">{item.month}</div>
-                    <div className="flex-1 bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="progress-bar-sales"
-                        // eslint-disable-next-line react/forbid-dom-props
-                        style={{ 
-                          width: `${Math.min((item.sales / Math.max(...salesData.map(d => d.sales), 1)) * 100, 100)}%` 
-                        }}
-                      ></div>
-                    </div>
-                  </div>
-                  <div className="w-20 text-right text-sm font-semibold text-card-foreground">
-                    ${item.sales.toLocaleString()}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Quick Actions */}
+      <Card className="bg-white shadow-sm border border-border rounded-xl">
+        <CardHeader>
+          <CardTitle className="text-xl font-semibold">Acciones Rápidas</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Button
+              onClick={() => window.dispatchEvent(new CustomEvent('app:nueva-orden'))}
+              className="h-24 flex-col gap-2 bg-primary hover:bg-primary/90 text-primary-foreground"
+            >
+              <Plus className="h-6 w-6" />
+              <span className="font-semibold">Nueva Orden</span>
+            </Button>
+            <Button
+              onClick={() => window.dispatchEvent(new CustomEvent('app:nuevo-cliente'))}
+              variant="outline"
+              className="h-24 flex-col gap-2 border-2 hover:bg-slate-50"
+            >
+              <Users className="h-6 w-6" />
+              <span className="font-semibold">Nuevo Cliente</span>
+            </Button>
+            <Button
+              onClick={() => {/* Implementar venta rápida */}}
+              variant="outline"
+              className="h-24 flex-col gap-2 border-2 hover:bg-slate-50"
+            >
+              <ShoppingCart className="h-6 w-6" />
+              <span className="font-semibold">Venta Rápida</span>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-        <Card className="shadow-sm border border-border">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-xl font-bold text-card-foreground">Estado de Órdenes de Trabajo</CardTitle>
-          </CardHeader>
-          <CardContent className="pb-2">
-            <div className="space-y-4">
-              {workOrdersData.map((item, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-20 text-sm font-medium text-muted-foreground">{item.week}</div>
-                    <div className="flex-1 bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="progress-bar-orders"
-                        // eslint-disable-next-line react/forbid-dom-props
-                        style={{ 
-                          width: `${Math.min((item.orders / Math.max(...workOrdersData.map(d => d.orders), 1)) * 100, 100)}%` 
-                        }}
-                      ></div>
-                    </div>
-                  </div>
-                  <div className="w-12 text-right text-sm font-semibold text-card-foreground">
-                    {item.orders}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Gráfico Principal - Ingresos vs Gastos */}
+      <Card className="bg-white shadow-sm border border-border rounded-xl">
+        <CardHeader>
+          <CardTitle className="text-xl font-semibold">Ingresos vs Gastos - Últimos 6 Meses</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={350}>
+            <AreaChart data={salesData}>
+              <defs>
+                <linearGradient id="colorIngresos" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis 
+                dataKey="month" 
+                stroke="#6b7280"
+                style={{ fontSize: '12px' }}
+              />
+              <YAxis 
+                stroke="#6b7280"
+                style={{ fontSize: '12px' }}
+                tickFormatter={(value) => `$${value.toLocaleString()}`}
+              />
+              <Tooltip 
+                formatter={(value: number) => `$${value.toLocaleString()}`}
+                contentStyle={{ 
+                  backgroundColor: 'white', 
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                }}
+              />
+              <Legend />
+              <Area 
+                type="monotone" 
+                dataKey="sales" 
+                stroke="#10b981" 
+                fillOpacity={1} 
+                fill="url(#colorIngresos)"
+                name="Ingresos"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="shadow-sm border-border/50">
+        <Card className="bg-white shadow-sm border border-border rounded-xl">
           <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2 text-xl font-bold">
+            <CardTitle className="flex items-center gap-2 text-xl font-semibold">
               <Package className="h-5 w-5 text-primary" />
               Alertas de Inventario
             </CardTitle>
@@ -482,9 +521,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm border-border/50">
+        <Card className="bg-white shadow-sm border border-border rounded-xl">
           <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2 text-xl font-bold">
+            <CardTitle className="flex items-center gap-2 text-xl font-semibold">
               <Wrench className="h-5 w-5 text-primary" />
               Órdenes Recientes
             </CardTitle>

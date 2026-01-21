@@ -29,7 +29,10 @@ export default function OrdenCliente({
   observaciones,
   nombreTaller,
   telefonoTaller,
-  emailTaller
+  emailTaller,
+  rutTaller = '',
+  direccionTaller = '',
+  sitioWebTaller = ''
 }: OrdenClienteProps) {
   
   const generarPDF = () => {
@@ -140,8 +143,12 @@ export default function OrdenCliente({
       <body>
         <div class="header">
           <div class="logo">${nombreTaller}</div>
-          <p>Servicios de Reparación Automotriz</p>
-          <p>Tel: ${telefonoTaller} | Email: ${emailTaller}</p>
+          ${rutTaller ? `<p style="margin: 5px 0; font-size: 14px;"><strong>RUT:</strong> ${rutTaller}</p>` : ''}
+          ${direccionTaller ? `<p style="margin: 5px 0; font-size: 14px;">${direccionTaller}</p>` : ''}
+          <p style="margin: 10px 0 5px 0; font-size: 14px;">
+            ${telefonoTaller ? `Tel: ${telefonoTaller}` : ''}${telefonoTaller && emailTaller ? ' | ' : ''}${emailTaller ? `Email: ${emailTaller}` : ''}
+          </p>
+          ${sitioWebTaller ? `<p style="margin: 5px 0; font-size: 14px;">${sitioWebTaller}</p>` : ''}
         </div>
 
         <div class="orden-info">
@@ -248,7 +255,7 @@ export default function OrdenCliente({
     switch (prioridad?.toLowerCase()) {
       case 'urgente': return 'text-red-600 bg-red-100';
       case 'alta': return 'text-orange-600 bg-orange-100';
-      case 'normal': return 'text-blue-600 bg-blue-100';
+      case 'normal': return 'text-red-600 bg-red-100';
       case 'baja': return 'text-green-600 bg-green-100';
       default: return 'text-gray-600 bg-gray-100';
     }
@@ -257,7 +264,7 @@ export default function OrdenCliente({
   const getEstadoColor = (estado?: string) => {
     switch (estado?.toLowerCase()) {
       case 'completada': return 'text-green-600 bg-green-100';
-      case 'en_proceso': return 'text-blue-600 bg-blue-100';
+      case 'en_proceso': return 'text-red-600 bg-red-100';
       case 'pendiente': return 'text-yellow-600 bg-yellow-100';
       case 'cancelada': return 'text-red-600 bg-red-100';
       default: return 'text-gray-600 bg-gray-100';

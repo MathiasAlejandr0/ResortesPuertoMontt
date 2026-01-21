@@ -14,7 +14,7 @@ export interface Migration {
 
 export class MigrationService {
   private migrations: Migration[] = [];
-  private currentVersion: string = '1.1.2';
+  private currentVersion: string = '1.2.0';
 
   constructor() {
     this.registerMigrations();
@@ -43,20 +43,117 @@ export class MigrationService {
       },
     });
 
-    // Agregar más migraciones aquí cuando se necesiten
-    // Ejemplo para futura versión 1.2.0:
-    // this.migrations.push({
-    //   version: '1.2.0',
-    //   description: 'Agregar nueva columna X a tabla Y',
-    //   up: async (db) => {
-    //     return new Promise((resolve, reject) => {
-    //       db.run('ALTER TABLE tabla ADD COLUMN nueva_columna TEXT', (err) => {
-    //         if (err) reject(err);
-    //         else resolve();
-    //       });
-    //     });
-    //   },
-    // });
+    // Migración 1.2.0: Módulos de Agenda, Caja Diaria y Técnicos
+    this.migrations.push({
+      version: '1.2.0',
+      description: 'Agregar módulos de Agenda, Caja Diaria y Técnicos con comisiones',
+      up: async (db: sqlite3.Database) => {
+        return new Promise((resolve, reject) => {
+          db.serialize(() => {
+            // Tabla de movimientos de caja
+            db.run(`
+              CREATE TABLE IF NOT EXISTS movimientos_caja (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo TEXT NOT NULL CHECK (tipo IN ('ingreso', 'egreso')),
+                monto INTEGER NOT NULL CHECK (monto >= 0),
+                descripcion TEXT NOT NULL,
+                metodo_pago TEXT CHECK (metodo_pago IN ('Efectivo', 'Débito', 'Crédito', 'Transferencia')),
+                fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                ordenId INTEGER,
+                caja_abierta BOOLEAN DEFAULT 1,
+                FOREIGN KEY (ordenId) REFERENCES ordenes_trabajo(id) ON DELETE SET NULL
+              )
+            `, (err: any) => {
+              if (err && !err.message.includes('already exists')) {
+                console.error('Error creando tabla movimientos_caja:', err);
+                reject(err);
+                return;
+              }
+            });
+
+            // Tabla de estado de caja
+            db.run(`
+              CREATE TABLE IF NOT EXISTS estado_caja (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_apertura DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                fecha_cierre DATETIME,
+                monto_inicial INTEGER NOT NULL DEFAULT 0 CHECK (monto_inicial >= 0),
+                monto_final INTEGER CHECK (monto_final >= 0),
+                estado TEXT NOT NULL DEFAULT 'abierta' CHECK (estado IN ('abierta', 'cerrada')),
+                observaciones TEXT
+              )
+            `, (err: any) => {
+              if (err && !err.message.includes('already exists')) {
+                console.error('Error creando tabla estado_caja:', err);
+                reject(err);
+                return;
+              }
+            });
+
+            // Extender tabla usuarios con porcentaje_comision (o crear tabla tecnicos)
+            // Primero intentamos agregar columna a usuarios
+            db.run(`
+              ALTER TABLE usuarios ADD COLUMN porcentaje_comision REAL DEFAULT 0 CHECK (porcentaje_comision >= 0 AND porcentaje_comision <= 100)
+            `, (err: any) => {
+              // Ignorar error si la columna ya existe
+              if (err && !err.message.includes('duplicate column')) {
+                console.warn('Advertencia al agregar columna porcentaje_comision:', err.message);
+              }
+            });
+
+            // Agregar columna fechaProgramada a ordenes_trabajo para agenda
+            db.run(`
+              ALTER TABLE ordenes_trabajo ADD COLUMN fechaProgramada DATETIME
+            `, (err: any) => {
+              if (err && !err.message.includes('duplicate column')) {
+                console.warn('Advertencia al agregar columna fechaProgramada:', err.message);
+              }
+            });
+
+            // Tabla de comisiones de técnicos
+            db.run(`
+              CREATE TABLE IF NOT EXISTS comisiones_tecnicos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ordenId INTEGER NOT NULL,
+                tecnicoId INTEGER,
+                tecnicoNombre TEXT NOT NULL,
+                monto_mano_obra INTEGER NOT NULL CHECK (monto_mano_obra >= 0),
+                porcentaje_comision REAL NOT NULL CHECK (porcentaje_comision >= 0 AND porcentaje_comision <= 100),
+                monto_comision INTEGER NOT NULL CHECK (monto_comision >= 0),
+                fecha_calculo DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                mes_referencia TEXT NOT NULL,
+                FOREIGN KEY (ordenId) REFERENCES ordenes_trabajo(id) ON DELETE CASCADE,
+                FOREIGN KEY (tecnicoId) REFERENCES usuarios(id) ON DELETE SET NULL
+              )
+            `, (err: any) => {
+              if (err && !err.message.includes('already exists')) {
+                console.error('Error creando tabla comisiones_tecnicos:', err);
+                reject(err);
+                return;
+              }
+            });
+
+            // Índices para mejor rendimiento
+            db.run('CREATE INDEX IF NOT EXISTS idx_movimientos_caja_fecha ON movimientos_caja(fecha)');
+            db.run('CREATE INDEX IF NOT EXISTS idx_movimientos_caja_tipo ON movimientos_caja(tipo)');
+            db.run('CREATE INDEX IF NOT EXISTS idx_estado_caja_fecha ON estado_caja(fecha_apertura)');
+            db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_orden ON comisiones_tecnicos(ordenId)');
+            db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_tecnico ON comisiones_tecnicos(tecnicoId)');
+            db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_mes ON comisiones_tecnicos(mes_referencia)');
+            db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_fecha_programada ON ordenes_trabajo(fechaProgramada)');
+
+            // Actualizar versión del esquema
+            db.run(`
+              INSERT OR REPLACE INTO configuracion (clave, valor, descripcion)
+              VALUES ('schema_version', '1.2.0', 'Versión del esquema de base de datos')
+            `, (err) => {
+              if (err) reject(err);
+              else resolve();
+            });
+          });
+        });
+      },
+    });
   }
 
   /**

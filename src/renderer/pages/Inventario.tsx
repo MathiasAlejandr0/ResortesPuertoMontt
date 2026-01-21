@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo, useDeferredValue, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
+import { RichTable, Column } from '../components/RichTable';
 import EditarRepuestoModal from '../components/EditarRepuestoModal';
 import OCRModal from '../components/OCRModal';
+import InvoiceReviewModal from '../components/InvoiceReviewModal';
 import StockModal from '../components/StockModal';
 import { useApp } from '../contexts/AppContext';
 import { notify, Logger, confirmAction } from '../utils/cn';
@@ -174,6 +176,8 @@ export default function InventarioPage() {
   const [editingRepuesto, setEditingRepuesto] = useState<Repuesto | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isOCRModalOpen, setIsOCRModalOpen] = useState(false);
+  const [isInvoiceReviewModalOpen, setIsInvoiceReviewModalOpen] = useState(false);
+  const [invoiceScanResult, setInvoiceScanResult] = useState<any>(null);
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
   const [stockAction, setStockAction] = useState<'aumentar' | 'reducir'>('aumentar');
   const [repuestoParaStock, setRepuestoParaStock] = useState<Repuesto | null>(null);
@@ -433,51 +437,70 @@ export default function InventarioPage() {
 
   // Función para procesar OCR
   const handleProcessOCR = async (file: File) => {
-    // Por ahora, simular el procesamiento OCR
-    // En una implementación real, aquí se enviaría la imagen a un servicio OCR
-    console.log('Procesando imagen OCR:', file.name);
-    
-    // Simular extracción de repuestos de la factura
-    const repuestosExtraidos = [
-      {
-        codigo: 'FAC-' + Date.now() + '-1',
-        nombre: 'Filtro de Aceite',
-        descripcion: 'Filtro de aceite extraído de factura',
-        precio: 15000,
-        stock: 1,
-        stockMinimo: 2,
-        categoria: 'Filtros',
+    setIsLoading(true);
+    try {
+      // Llamar al servicio de escaneo de facturas
+      const result = await window.electronAPI.scanInvoice();
+      
+      if (!result.success) {
+        notify.error('Error', result.error || 'Error al escanear la factura');
+        return;
+      }
+
+      if (result.items.length === 0) {
+        notify.warning('Sin resultados', 'No se encontraron items en la factura. Verifica que la imagen sea clara y legible.');
+        return;
+      }
+
+      // Mostrar modal de revisión
+      setInvoiceScanResult(result);
+      setIsOCRModalOpen(false);
+      setIsInvoiceReviewModalOpen(true);
+    } catch (error) {
+      console.error('Error procesando OCR:', error);
+      notify.error('Error', 'Error al procesar la imagen. Por favor, inténtalo de nuevo.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleConfirmInvoiceItems = async (items: any[]) => {
+    setIsLoading(true);
+    try {
+      // Convertir items de factura a formato de repuesto
+      const repuestosParaGuardar = items.map(item => ({
+        codigo: item.rawCode || `FAC-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        nombre: item.description,
+        descripcion: item.description,
+        precio: item.unitPrice,
+        precioCosto: item.unitPrice, // Usar precio como costo inicial
+        stock: item.quantity,
+        stockMinimo: 5,
+        categoria: 'General',
         marca: 'Genérico',
         ubicacion: 'Estante A1',
         activo: true
-      },
-      {
-        codigo: 'FAC-' + Date.now() + '-2',
-        nombre: 'Aceite Motor 5W30',
-        descripcion: 'Aceite de motor extraído de factura',
-        precio: 25000,
-        stock: 2,
-        stockMinimo: 3,
-        categoria: 'Lubricantes',
-        marca: 'Genérico',
-        ubicacion: 'Estante B2',
-        activo: true
-      }
-    ];
+      }));
 
-    // Agregar los repuestos extraídos al inventario
-    for (const repuesto of repuestosExtraidos) {
-      try {
+      // Guardar repuestos en la base de datos
+      for (const repuesto of repuestosParaGuardar) {
         await window.electronAPI.saveRepuesto(repuesto);
-      } catch (error) {
-        console.error('Error guardando repuesto extraído:', error);
       }
+
+      notify.success('Éxito', `Se importaron ${repuestosParaGuardar.length} repuestos desde la factura`);
+      
+      // Refrescar lista
+      await refreshRepuestos();
+      
+      // Cerrar modales
+      setIsInvoiceReviewModalOpen(false);
+      setInvoiceScanResult(null);
+    } catch (error) {
+      console.error('Error guardando repuestos:', error);
+      notify.error('Error', 'Error al guardar los repuestos. Por favor, inténtalo de nuevo.');
+    } finally {
+      setIsLoading(false);
     }
-
-    // Refrescar todos los repuestos del contexto
-    await refreshRepuestos();
-
-    alert(`Se procesaron ${repuestosExtraidos.length} repuestos de la factura`);
   };
 
   // Función para calcular porcentaje de stock
@@ -495,6 +518,119 @@ export default function InventarioPage() {
     const rounded = Math.round(percentage / 10) * 10;
     return `progress-${Math.min(rounded, 100)}`;
   };
+
+  // Preparar datos para RichTable
+  const inventarioTableData = useMemo(() => {
+    return displayedRepuestos.map(repuesto => ({
+      ...repuesto,
+      stockEstado: getStockEstado(repuesto),
+      stockPercentage: getStockPercentage(repuesto),
+    }));
+  }, [displayedRepuestos]);
+
+  // Columnas para RichTable
+  const columns: Column<typeof inventarioTableData[0]>[] = useMemo(() => [
+    {
+      key: 'codigo',
+      header: 'SKU',
+      sortable: true,
+      accessor: (row) => (
+        <span className="font-semibold text-foreground">
+          {row.codigo || `SKU-${row.id}`}
+        </span>
+      ),
+    },
+    {
+      key: 'nombre',
+      header: 'Nombre',
+      sortable: true,
+      accessor: (row) => (
+        <div>
+          <span className="text-foreground">{row.nombre || ''}</span>
+          {row.descripcion && (
+            <div className="text-xs text-muted-foreground mt-1">
+              {row.descripcion}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'categoria',
+      header: 'Categoría',
+      sortable: true,
+      accessor: (row) => (
+        <span className="text-foreground">{row.categoria || 'Sin categoría'}</span>
+      ),
+    },
+    {
+      key: 'stock',
+      header: 'Stock',
+      sortable: true,
+      accessor: (row) => {
+        const stock = row.stock || 0;
+        const stockMinimo = (row.stockMinimo && row.stockMinimo > 0) ? row.stockMinimo : 5;
+        const percentage = row.stockPercentage;
+        const progressBarClass = `stock-progress-bar ${row.stockEstado.estado.toLowerCase()}`;
+        const progressWidthClass = getProgressWidthClass(percentage);
+        
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-foreground">
+                {stock} / {stockMinimo}
+              </span>
+              {stock < stockMinimo && (
+                <AlertTriangle className="h-4 w-4 text-yellow-500" title="Stock bajo del mínimo" />
+              )}
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className={`h-2 rounded-full ${progressBarClass} ${progressWidthClass}`}
+                style={{ width: `${Math.min(percentage, 100)}%` }}
+              ></div>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'estado',
+      header: 'Estado',
+      sortable: true,
+      accessor: (row) => (
+        <Badge variant={row.stockEstado.color as any} className="text-xs">
+          {row.stockEstado.estado}
+        </Badge>
+      ),
+    },
+    {
+      key: 'precio',
+      header: 'Precio Venta',
+      sortable: true,
+      accessor: (row) => (
+        <div className="flex items-center gap-2">
+          <DollarSign className="h-4 w-4 text-muted-foreground" />
+          <span className="font-semibold text-foreground">
+            ${(row.precio || 0).toLocaleString()}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'ubicacion',
+      header: 'Ubicación',
+      sortable: true,
+      accessor: (row) => (
+        <div className="flex items-center gap-2">
+          <MapPin className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-foreground">
+            {row.ubicacion || 'Sin ubicación'}
+          </span>
+        </div>
+      ),
+    },
+  ], []);
 
   // Función para manejar la importación de archivo Excel
   const handleExcelUpload = async () => {
@@ -545,39 +681,31 @@ export default function InventarioPage() {
   };
 
   return (
-    <div className="flex flex-col gap-8 p-6 lg:p-8">
-      {/* Header */}
-      <div className="flex flex-col gap-3 pb-2 border-b border-border">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight text-card-foreground">Inventario</h1>
-            <p className="text-base text-muted-foreground mt-2">Gestiona el stock de repuestos y materiales</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleExcelUpload}
-              disabled={isUploadingExcel}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <FileSpreadsheet className="h-5 w-5" />
-              {isUploadingExcel ? 'Procesando...' : 'Importar Excel'}
-            </button>
-            <button 
-              onClick={handleAbrirOCR}
-              className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors"
-            >
-              <Camera className="h-5 w-5" />
-              Escanear Factura
-            </button>
-            <button 
-              onClick={handleNuevoRepuesto}
-              className="btn-primary flex items-center gap-2"
-            >
-              <Plus className="h-5 w-5" />
-              Nuevo Item
-            </button>
-          </div>
-        </div>
+    <div className="flex flex-col gap-6 p-6">
+      {/* Acciones rápidas */}
+      <div className="flex items-center justify-end gap-3">
+        <button
+          onClick={handleExcelUpload}
+          disabled={isUploadingExcel}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          <FileSpreadsheet className="h-5 w-5" />
+          {isUploadingExcel ? 'Procesando...' : 'Importar Excel'}
+        </button>
+        <button 
+          onClick={handleAbrirOCR}
+          className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors"
+        >
+          <Camera className="h-5 w-5" />
+          Escanear Factura
+        </button>
+        <button 
+          onClick={handleNuevoRepuesto}
+          className="btn-primary flex items-center gap-2"
+        >
+          <Plus className="h-5 w-5" />
+          Nuevo Item
+        </button>
       </div>
 
       {/* KPI Cards */}
@@ -656,208 +784,86 @@ export default function InventarioPage() {
       </div>
 
       {/* Lista de Inventario */}
-      <Card className="shadow-sm border border-border">
-        <CardHeader className="pb-4">
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-xl font-bold text-card-foreground">Lista de Inventario</CardTitle>
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <input
-                  type="text"
-                  placeholder="Buscar por nombre, código, descripción... (ej: 'filtro aceite')"
-                  value={searchTerm}
-                  onChange={(e) => {
-                    // Actualizar inmediatamente para que el usuario vea los caracteres
-                    // El filtrado se hará con deferredSearchTerm (no bloquea)
-                    setSearchTerm(e.target.value);
-                  }}
-                  className="pl-10 pr-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200 w-80"
-                />
-              </div>
-              <select
-                value={filterCategoria}
-                onChange={(e) => setFilterCategoria(e.target.value)}
-                title="Filtrar por categoría"
-                aria-label="Filtrar por categoría"
-                className="px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
-              >
-                <option value="todas">Todas</option>
-                {categorias.map(categoria => (
-                  <option key={categoria} value={categoria}>{categoria}</option>
-                ))}
-              </select>
-              <select
-                value={filterEstado}
-                onChange={(e) => setFilterEstado(e.target.value)}
-                title="Filtrar por estado"
-                aria-label="Filtrar por estado"
-                className="px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
-              >
-                <option value="todos">Todos</option>
-                <option value="critico">Crítico</option>
-                <option value="bajo">Bajo</option>
-                <option value="normal">Normal</option>
-              </select>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">SKU</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Nombre</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Categoría</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Stock</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Estado</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Precio Venta</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Ubicación</th>
-                  <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {isSearching ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-8 text-muted-foreground">Buscando...</td>
-                  </tr>
-                ) : displayedRepuestos.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-8 text-muted-foreground">
-                      {deferredSearchTerm || filterCategoria !== 'todas' || filterEstado !== 'todos' ? 
-                        'No se encontraron items con ese criterio' : 
-                        filteredRepuestos.length === 0 ? 'No hay items en el inventario' :
-                        `Mostrando 5 de ${filteredRepuestos.length} items. Usa la barra de búsqueda para encontrar más.`
-                      }
-                    </td>
-                  </tr>
-                ) : (
-                  displayedRepuestos.map((repuesto) => {
-                    const stockEstado = getStockEstado(repuesto);
-                    const stockPercentage = getStockPercentage(repuesto);
-                    const progressBarClass = `stock-progress-bar ${stockEstado.estado.toLowerCase()}`;
-                    const progressWidthClass = getProgressWidthClass(stockPercentage);
-                    
-                    return (
-                      <tr key={repuesto.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                        <td className="py-4 px-4">
-                          <span className="font-semibold text-card-foreground">
-                            {highlight(repuesto.codigo || `SKU-${repuesto.id}`, 'codigo')}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="text-card-foreground">
-                            {highlight(repuesto.nombre || '', 'nombre')}
-                          </span>
-                          {repuesto.descripcion && (
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {highlight(repuesto.descripcion, 'descripcion')}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="text-card-foreground">
-                            {repuesto.categoria || 'Sin categoría'}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-card-foreground">
-                                {repuesto.stock || 0} / {(repuesto.stockMinimo && repuesto.stockMinimo > 0) ? repuesto.stockMinimo : 5}
-                              </span>
-                              {(repuesto.stock || 0) < ((repuesto.stockMinimo && repuesto.stockMinimo > 0) ? repuesto.stockMinimo : 5) && (
-                                <AlertTriangle className="h-4 w-4 text-yellow-500" title="Stock bajo del mínimo" />
-                              )}
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2">
-                              <div 
-                                className={`h-2 rounded-full ${progressBarClass} ${progressWidthClass}`}
-                              ></div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4">
-                          <Badge variant={stockEstado.color as any} className="text-xs">
-                            {stockEstado.estado}
-                          </Badge>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="flex items-center gap-2">
-                            <DollarSign className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-semibold text-card-foreground">
-                              ${(repuesto.precio || 0).toLocaleString()}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm text-card-foreground">
-                              {repuesto.ubicacion || 'Sin ubicación'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="flex items-center gap-2">
-                            <button 
-                              onClick={() => handleAumentarStock(repuesto)}
-                              className="p-2 hover:bg-muted rounded-lg transition-colors" 
-                              title="Agregar stock"
-                              disabled={isLoading}
-                            >
-                              <PlusIcon className="h-4 w-4 text-green-600" />
-                            </button>
-                            <button 
-                              onClick={() => handleReducirStock(repuesto)}
-                              className="p-2 hover:bg-muted rounded-lg transition-colors" 
-                              title="Reducir stock"
-                              disabled={isLoading}
-                            >
-                              <MinusIcon className="h-4 w-4 text-red-600" />
-                            </button>
-                            <button 
-                              onClick={() => handleEditarRepuesto(repuesto)}
-                              className="p-2 hover:bg-muted rounded-lg transition-colors" 
-                              title="Editar item"
-                              disabled={isLoading}
-                            >
-                              <Edit className="h-4 w-4 text-primary" />
-                            </button>
-                            <button 
-                              onClick={() => handleEliminarRepuesto(repuesto)}
-                              className="p-2 hover:bg-muted rounded-lg transition-colors" 
-                              title="Eliminar item"
-                              disabled={isLoading}
-                            >
-                              <Trash2 className="h-4 w-4 text-red-600" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-            {!deferredSearchTerm && filterCategoria === 'todas' && filterEstado === 'todos' && filteredRepuestos.length > 5 && (
-              <div className="p-4 bg-blue-50 border-t border-blue-200 text-center">
-                <p className="text-sm text-blue-800">
-                  Mostrando 5 de {filteredRepuestos.length} items. Usa la barra de búsqueda arriba para encontrar más items.
-                </p>
-              </div>
-            )}
-            {deferredSearchTerm && filteredRepuestos.length > displayedRepuestos.length && (
-              <div className="p-4 text-center">
-                <button onClick={loadMore} className="px-4 py-2 border rounded hover:bg-muted">
-                  Cargar más resultados
+      <div className="space-y-4">
+        {/* Filtros adicionales */}
+        <div className="flex items-center gap-4">
+          <select
+            value={filterCategoria}
+            onChange={(e) => setFilterCategoria(e.target.value)}
+            title="Filtrar por categoría"
+            aria-label="Filtrar por categoría"
+            className="px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
+          >
+            <option value="todas">Todas las categorías</option>
+            {categorias.map(categoria => (
+              <option key={categoria} value={categoria}>{categoria}</option>
+            ))}
+          </select>
+          <select
+            value={filterEstado}
+            onChange={(e) => setFilterEstado(e.target.value)}
+            title="Filtrar por estado"
+            aria-label="Filtrar por estado"
+            className="px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
+          >
+            <option value="todos">Todos los estados</option>
+            <option value="critico">Crítico</option>
+            <option value="bajo">Bajo</option>
+            <option value="normal">Normal</option>
+          </select>
+        </div>
+
+        {isSearching ? (
+          <div className="text-center py-8 text-muted-foreground">Buscando...</div>
+        ) : (
+          <RichTable
+            data={inventarioTableData}
+            columns={columns}
+            searchable={true}
+            searchPlaceholder="Buscar por nombre, código, descripción..."
+            onEdit={(row) => handleEditarRepuesto(row)}
+            onDelete={(row) => handleEliminarRepuesto(row)}
+            customActions={(row) => (
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => handleAumentarStock(row)}
+                  className="p-1.5 hover:bg-muted rounded transition-colors" 
+                  title="Agregar stock"
+                  disabled={isLoading}
+                >
+                  <PlusIcon className="h-4 w-4 text-green-600" />
+                </button>
+                <button 
+                  onClick={() => handleReducirStock(row)}
+                  className="p-1.5 hover:bg-muted rounded transition-colors" 
+                  title="Reducir stock"
+                  disabled={isLoading}
+                >
+                  <MinusIcon className="h-4 w-4 text-red-600" />
                 </button>
               </div>
             )}
+            emptyMessage={
+              deferredSearchTerm || filterCategoria !== 'todas' || filterEstado !== 'todos' ? 
+                'No se encontraron items con ese criterio' : 
+                filteredRepuestos.length === 0 ? 'No hay items en el inventario' :
+                `Mostrando ${displayedRepuestos.length} de ${filteredRepuestos.length} items. Usa la barra de búsqueda para encontrar más.`
+            }
+          />
+        )}
+        
+        {/* Botón cargar más */}
+        {!isSearching && displayedRepuestos.length > 0 && displayedRepuestos.length < filteredRepuestos.length && (
+          <div className="text-center py-4">
+            <button
+              onClick={loadMore}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              Cargar más items ({filteredRepuestos.length - displayedRepuestos.length} restantes)
+            </button>
           </div>
-        </CardContent>
-      </Card>
+        )}
+      </div>
 
       {/* Modal Editar Repuesto */}
       <EditarRepuestoModal
@@ -876,6 +882,23 @@ export default function InventarioPage() {
         onClose={() => setIsOCRModalOpen(false)}
         onProcessOCR={handleProcessOCR}
       />
+
+      {/* Modal Revisión de Factura */}
+      {invoiceScanResult && (
+        <InvoiceReviewModal
+          isOpen={isInvoiceReviewModalOpen}
+          onClose={() => {
+            setIsInvoiceReviewModalOpen(false);
+            setInvoiceScanResult(null);
+          }}
+          onConfirm={handleConfirmInvoiceItems}
+          items={invoiceScanResult.items || []}
+          imagenOriginal={invoiceScanResult.imagenOriginal}
+          imagenProcesada={invoiceScanResult.imagenProcesada}
+          isLoading={isLoading}
+          sourceType={invoiceScanResult.sourceType || 'image'}
+        />
+      )}
 
       {/* Modal Stock */}
       <StockModal

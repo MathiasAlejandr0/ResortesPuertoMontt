@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useDeferredValue, startTransition } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import CotizacionFormMejorado from '../components/CotizacionFormMejorado';
+import OrdenFormMejorado from '../components/OrdenFormMejorado';
 import CotizacionInterna from '../components/CotizacionInterna';
 import CotizacionPDF from '../components/CotizacionPDF';
 import VerCotizacionModal from '../components/VerCotizacionModal';
@@ -30,10 +30,14 @@ import {
   X
 } from 'lucide-react';
 import { Cliente, Cotizacion, DetalleCotizacion, Vehiculo, Servicio, Repuesto } from '../types';
+import { useNegocioInfo } from '../hooks/useNegocioInfo';
 
 export default function CotizacionesPage() {
   // Usar el contexto para acceder a los datos
   const { clientes, cotizaciones: initialCotizaciones, vehiculos, servicios, repuestos, addCotizacion, refreshCotizaciones } = useApp();
+  
+  // Obtener información del negocio desde la configuración
+  const { nombreTaller, telefonoTaller, emailTaller, rutTaller, direccionTaller, sitioWebTaller } = useNegocioInfo();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('todos');
   // Usar deferred value para búsqueda (no bloquea la UI)
@@ -267,7 +271,10 @@ export default function CotizacionesPage() {
     setIsFormOpen(true);
   };
 
-  const handleSaveCotizacionNueva = async (cotizacion: Cotizacion, repuestosSeleccionados?: Array<{ id: number; nombre: string; precio: number; cantidad: number; subtotal: number }>) => {
+  const handleSaveCotizacionNueva = async (
+    cotizacion: Cotizacion,
+    detalles?: Array<{ tipo: 'servicio' | 'repuesto'; servicioId?: number; repuestoId?: number; cantidad: number; precio: number; subtotal: number; descripcion: string }>
+  ) => {
     setIsLoading(true);
     try {
       Logger.log('💾 Intentando guardar cotización:', cotizacion);
@@ -281,16 +288,16 @@ export default function CotizacionesPage() {
         throw new Error('El vehículo no está seleccionado o no se pudo crear');
       }
       
-      // Convertir repuestos a detalles para la transacción
-      const detallesParaTransaccion = Array.isArray(repuestosSeleccionados) && repuestosSeleccionados.length > 0
-        ? repuestosSeleccionados.map(r => ({
-            tipo: 'repuesto' as const,
-            repuestoId: r.id,
-            servicioId: undefined,
-            cantidad: r.cantidad || 1,
-            precio: r.precio || 0,
-            subtotal: r.subtotal || (r.precio || 0) * (r.cantidad || 1),
-            descripcion: r.nombre || ''
+      // Convertir detalles al formato correcto para la transacción
+      const detallesParaTransaccion = Array.isArray(detalles) && detalles.length > 0
+        ? detalles.map(d => ({
+            tipo: d.tipo,
+            repuestoId: d.repuestoId || undefined,
+            servicioId: d.servicioId || undefined,
+            cantidad: d.cantidad || 1,
+            precio: d.precio || 0,
+            subtotal: d.subtotal || (d.precio || 0) * (d.cantidad || 1),
+            descripcion: d.descripcion || ''
           }))
         : [];
 
@@ -423,11 +430,6 @@ export default function CotizacionesPage() {
     }
   };
 
-  // Calcular estadísticas
-  const totalCotizaciones = cotizaciones.length;
-  const cotizacionesEnviadas = 0; // Estado 'Enviada' no se persiste en BD
-  const cotizacionesAprobadas = cotizaciones.filter(c => c.estado === 'Aprobada').length;
-
   // Función para obtener cliente
   const getCliente = (clienteId: number) => {
     return clientes.find(c => c.id === clienteId);
@@ -488,80 +490,37 @@ export default function CotizacionesPage() {
     }
   };
 
+  // Si el formulario está abierto, mostrar solo el formulario (estilo Dirup)
+  if (isFormOpen) {
+    return (
+      <div className="flex flex-col h-full">
+        <OrdenFormMejorado
+          isOpen={isFormOpen}
+          onClose={() => setIsFormOpen(false)}
+          onSave={handleSaveCotizacionNueva}
+          fullPage={true}
+          mode="presupuesto"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-8 p-6 lg:p-8">
       {/* Header */}
       <div className="flex flex-col gap-3 pb-2 border-b border-border">
         <div className="flex justify-between items-start">
           <div>
-            <h1 className="text-4xl font-bold tracking-tight text-card-foreground">Cotizaciones</h1>
-            <p className="text-base text-muted-foreground mt-2">Gestiona las cotizaciones de servicios</p>
+            <p className="text-base text-muted-foreground mt-2">Gestiona los presupuestos de servicios</p>
           </div>
           <button 
             onClick={handleNewCotizacion}
             className="btn-primary flex items-center gap-2"
           >
             <Plus className="h-5 w-5" />
-            Nueva Cotización
+            Nuevo Presupuesto
           </button>
         </div>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid gap-6 md:grid-cols-3">
-        <Card className="stat-card-animated fade-in-up">
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                  Total
-                </p>
-                <p className="text-3xl font-bold text-card-foreground tracking-tight">
-                  {totalCotizaciones}
-                </p>
-              </div>
-              <div className="icon-red rounded-xl p-3.5 shadow-sm">
-                <FileText className="h-7 w-7" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="stat-card-animated fade-in-up">
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                  Enviadas
-                </p>
-                <p className="text-3xl font-bold text-card-foreground tracking-tight">
-                  {cotizacionesEnviadas}
-                </p>
-              </div>
-              <div className="icon-blue rounded-xl p-3.5 shadow-sm">
-                <Send className="h-7 w-7" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="stat-card-animated fade-in-up">
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                  Aprobadas
-                </p>
-                <p className="text-3xl font-bold text-card-foreground tracking-tight">
-                  {cotizacionesAprobadas}
-                </p>
-              </div>
-              <div className="icon-green rounded-xl p-3.5 shadow-sm">
-                <CheckCircle className="h-7 w-7" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Lista de Cotizaciones */}
@@ -701,7 +660,7 @@ export default function CotizacionesPage() {
                               className="p-2 hover:bg-muted rounded-lg transition-colors" 
                               title="Ver versión cliente (sin precios)"
                             >
-                              <FileText className="h-4 w-4 text-blue-600" />
+                              <FileText className="h-4 w-4 text-red-600" />
                             </button>
                             <button 
                               onClick={() => handleEditCotizacion(cotizacion)}
@@ -722,7 +681,7 @@ export default function CotizacionesPage() {
                               className="p-2 hover:bg-muted rounded-lg transition-colors" 
                               title="Enviar por Email"
                             >
-                              <Mail className="h-4 w-4 text-blue-600" />
+                              <Mail className="h-4 w-4 text-red-600" />
                             </button>
                             <button 
                               onClick={() => cotizacion.id && handleDeleteCotizacion(cotizacion.id)}
@@ -783,10 +742,11 @@ export default function CotizacionesPage() {
         </CardContent>
       </Card>
       {/* Formulario Inteligente - Ahora usa el contexto */}
-      <CotizacionFormMejorado
+      <OrdenFormMejorado
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
         onSave={handleSaveCotizacionNueva}
+        mode="presupuesto"
       />
 
       {/* Modal Ver Cotización */}
@@ -847,9 +807,12 @@ export default function CotizacionesPage() {
                   repuestos={repuestosInternos}
                   descripcionTrabajo={cotizacionSeleccionadaParaVer.descripcion}
                   observaciones={cotizacionSeleccionadaParaVer.observaciones}
-                  nombreTaller="Resortes Puerto Montt"
-                  telefonoTaller="+56 9 1234 5678"
-                  emailTaller="info@resortespuertomontt.cl"
+                  nombreTaller={nombreTaller}
+                  telefonoTaller={telefonoTaller}
+                  emailTaller={emailTaller}
+                  rutTaller={rutTaller}
+                  direccionTaller={direccionTaller}
+                  sitioWebTaller={sitioWebTaller}
                 />
               )}
             </div>
@@ -886,9 +849,12 @@ export default function CotizacionesPage() {
                   repuestos={repuestosCliente}
                   descripcionTrabajo={cotizacionSeleccionadaParaVer.descripcion}
                   observaciones={cotizacionSeleccionadaParaVer.observaciones}
-                  nombreTaller="Resortes Puerto Montt"
-                  telefonoTaller="+56 9 1234 5678"
-                  emailTaller="info@resortespuertomontt.cl"
+                  nombreTaller={nombreTaller}
+                  telefonoTaller={telefonoTaller}
+                  emailTaller={emailTaller}
+                  rutTaller={rutTaller}
+                  direccionTaller={direccionTaller}
+                  sitioWebTaller={sitioWebTaller}
                 />
               )}
             </div>

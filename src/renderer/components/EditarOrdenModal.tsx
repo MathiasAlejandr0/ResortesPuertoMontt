@@ -479,7 +479,7 @@ export default function EditarOrdenModal({
                     size="sm"
                     variant="outline"
                     onClick={() => addDetalle('repuesto')}
-                    className="bg-blue-50 hover:bg-blue-100 border-blue-300 text-blue-700"
+                    className="bg-red-50 hover:bg-red-100 border-red-300 text-red-700"
                     title="Agregar un nuevo repuesto"
                   >
                     <Plus className="h-4 w-4 mr-1" />

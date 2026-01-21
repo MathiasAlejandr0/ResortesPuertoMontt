@@ -113,16 +113,16 @@ export default function PhoneInputModal({
               </p>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+            <div className="bg-red-50 border border-red-200 rounded-md p-3">
               <div className="flex items-start gap-2">
-                <div className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Send className="h-3 w-3 text-blue-600" />
+                <div className="w-5 h-5 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Send className="h-3 w-3 text-red-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-blue-800 font-medium">
+                  <p className="text-sm text-red-800 font-medium">
                     ¿Qué pasará después?
                   </p>
-                  <p className="text-xs text-blue-700 mt-1">
+                  <p className="text-xs text-red-700 mt-1">
                     Se abrirá WhatsApp Web con el número ingresado y un mensaje profesional 
                     con la {documentType === 'cotización' ? 'cotización' : 'orden de trabajo'}.
                   </p>

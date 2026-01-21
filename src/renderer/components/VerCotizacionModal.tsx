@@ -257,7 +257,7 @@ export default function VerCotizacionModal({
                 {detallesCotizacion.map((detalle, index) => (
                   <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${detalle.tipo === 'servicio' ? 'bg-blue-500' : 'bg-green-500'}`}></div>
+                      <div className={`w-2 h-2 rounded-full ${detalle.tipo === 'servicio' ? 'bg-red-500' : 'bg-green-500'}`}></div>
                       <div>
                         <p className="font-medium">{detalle.nombre}</p>
                         <p className="text-sm text-gray-500">

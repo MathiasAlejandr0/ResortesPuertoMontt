@@ -147,8 +147,8 @@ export default function CotizacionInterna({
       )}
 
       {/* Desglose de Costos */}
-      <div className="bg-blue-50 p-6 rounded-lg mb-6">
-        <h3 className="text-lg font-semibold text-blue-600 mb-4 flex items-center gap-2">
+      <div className="bg-red-50 p-6 rounded-lg mb-6">
+        <h3 className="text-lg font-semibold text-red-600 mb-4 flex items-center gap-2">
           <Calculator className="h-5 w-5" />
           Desglose de Costos
         </h3>

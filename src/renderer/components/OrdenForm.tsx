@@ -185,7 +185,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-black rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-white">
             {orden ? 'Editar Orden de Trabajo' : 'Nueva Orden de Trabajo'}
@@ -212,16 +212,16 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
                   setBusquedaCliente(e.target.value);
                   setMostrarBusquedaCliente(true);
                 }}
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+                className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
               />
               
               {mostrarBusquedaCliente && busquedaCliente && (
-                <div className="absolute z-10 w-full bg-gray-700 border border-gray-600 rounded mt-1 max-h-40 overflow-y-auto">
+                <div className="absolute z-10 w-full bg-gray-800 border border-gray-700 rounded mt-1 max-h-40 overflow-y-auto">
                   {clientesFiltrados.map(cliente => (
                     <div
                       key={cliente.id}
                       onClick={() => handleClienteSelect(cliente)}
-                      className="px-3 py-2 hover:bg-gray-600 cursor-pointer text-white"
+                      className="px-3 py-2 hover:bg-gray-700 cursor-pointer text-white"
                     >
                       <div className="font-medium">{cliente.nombre}</div>
                       <div className="text-sm text-gray-300">RUT: {cliente.rut}</div>
@@ -229,7 +229,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
                   ))}
                   <div
                     onClick={() => setMostrarNuevoCliente(true)}
-                    className="px-3 py-2 hover:bg-gray-600 cursor-pointer text-red-400 border-t border-gray-600"
+                    className="px-3 py-2 hover:bg-gray-700 cursor-pointer text-red-400 border-t border-gray-700"
                   >
                     + Crear nuevo cliente
                   </div>
@@ -238,7 +238,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
             </div>
 
             {formData.cliente && (
-              <div className="bg-gray-700 p-3 rounded">
+              <div className="bg-gray-800 p-3 rounded">
                 <div className="text-white font-medium">{formData.cliente.nombre}</div>
                 <div className="text-gray-300 text-sm">RUT: {formData.cliente.rut}</div>
                 <div className="text-gray-300 text-sm">Tel: {formData.cliente.telefono}</div>
@@ -259,16 +259,16 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
                   setBusquedaVehiculo(e.target.value);
                   setMostrarBusquedaVehiculo(true);
                 }}
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+                className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
               />
               
               {mostrarBusquedaVehiculo && busquedaVehiculo && (
-                <div className="absolute z-10 w-full bg-gray-700 border border-gray-600 rounded mt-1 max-h-40 overflow-y-auto">
+                <div className="absolute z-10 w-full bg-gray-800 border border-gray-700 rounded mt-1 max-h-40 overflow-y-auto">
                   {vehiculosFiltrados.map(vehiculo => (
                     <div
                       key={vehiculo.id}
                       onClick={() => handleVehiculoSelect(vehiculo)}
-                      className="px-3 py-2 hover:bg-gray-600 cursor-pointer text-white"
+                      className="px-3 py-2 hover:bg-gray-700 cursor-pointer text-white"
                     >
                       <div className="font-medium">{vehiculo.marca} {vehiculo.modelo}</div>
                       <div className="text-sm text-gray-300">Patente: {vehiculo.patente}</div>
@@ -276,7 +276,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
                   ))}
                   <div
                     onClick={() => setMostrarNuevoVehiculo(true)}
-                    className="px-3 py-2 hover:bg-gray-600 cursor-pointer text-red-400 border-t border-gray-600"
+                    className="px-3 py-2 hover:bg-gray-700 cursor-pointer text-red-400 border-t border-gray-700"
                   >
                     + Crear nuevo vehículo
                   </div>
@@ -285,7 +285,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
             </div>
 
             {formData.vehiculo && (
-              <div className="bg-gray-700 p-3 rounded">
+              <div className="bg-gray-800 p-3 rounded">
                 <div className="text-white font-medium">{formData.vehiculo.marca} {formData.vehiculo.modelo}</div>
                 <div className="text-gray-300 text-sm">Patente: {formData.vehiculo.patente}</div>
                 <div className="text-gray-300 text-sm">Año: {formData.vehiculo.año}</div>
@@ -308,7 +308,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
               type="number"
               value={formData.kilometrajeEntrada || ''}
               onChange={(e) => setFormData(prev => ({ ...prev, kilometrajeEntrada: parseInt(e.target.value) || undefined }))}
-              className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+              className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
               placeholder="Ej: 50000"
             />
           </div>
@@ -318,7 +318,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
               type="number"
               value={formData.kilometrajeSalida || ''}
               onChange={(e) => setFormData(prev => ({ ...prev, kilometrajeSalida: parseInt(e.target.value) || undefined }))}
-              className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+              className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
               placeholder="Ej: 50100"
             />
           </div>
@@ -331,7 +331,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
             <textarea
               value={formData.descripcion}
               onChange={(e) => setFormData(prev => ({ ...prev, descripcion: e.target.value }))}
-              className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+              className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
               rows={3}
               placeholder="Describe el trabajo a realizar..."
             />
@@ -342,7 +342,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
             <textarea
               value={formData.observaciones}
               onChange={(e) => setFormData(prev => ({ ...prev, observaciones: e.target.value }))}
-              className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+              className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
               rows={2}
               placeholder="Observaciones adicionales..."
             />
@@ -357,7 +357,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
               <div
                 key={servicio.id}
                 onClick={() => handleAddServicio(servicio)}
-                className="bg-gray-700 p-3 rounded cursor-pointer hover:bg-gray-600"
+                className="bg-gray-800 p-3 rounded cursor-pointer hover:bg-gray-700"
               >
                 <div className="text-white font-medium">{servicio.nombre}</div>
                 <div className="text-gray-300 text-sm">${servicio.precio.toLocaleString()}</div>
@@ -379,16 +379,16 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
                 setBusquedaRepuesto(e.target.value);
                 setMostrarBusquedaRepuesto(true);
               }}
-              className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+              className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
             />
             
             {mostrarBusquedaRepuesto && busquedaRepuesto && (
-              <div className="absolute z-10 w-full bg-gray-700 border border-gray-600 rounded mt-1 max-h-40 overflow-y-auto">
+              <div className="absolute z-10 w-full bg-gray-800 border border-gray-700 rounded mt-1 max-h-40 overflow-y-auto">
                 {repuestosFiltrados.slice(0, 10).map(repuesto => (
                   <div
                     key={repuesto.id}
                     onClick={() => handleAddRepuesto(repuesto)}
-                    className="px-3 py-2 hover:bg-gray-600 cursor-pointer text-white"
+                    className="px-3 py-2 hover:bg-gray-700 cursor-pointer text-white"
                   >
                     <div className="font-medium">{repuesto.nombre}</div>
                     <div className="text-sm text-gray-300">Código: {repuesto.codigo}</div>
@@ -403,9 +403,9 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
         {/* Items de la Orden */}
         <div className="mt-6">
           <h3 className="text-lg font-semibold text-white mb-4">Items de la Orden</h3>
-          <div className="bg-gray-700 rounded overflow-hidden">
+          <div className="bg-gray-800 rounded overflow-hidden">
             <table className="w-full">
-              <thead className="bg-gray-600">
+              <thead className="bg-gray-700">
                 <tr>
                   <th className="px-4 py-2 text-left text-white">Descripción</th>
                   <th className="px-4 py-2 text-left text-white">Cantidad</th>
@@ -416,7 +416,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
               </thead>
               <tbody>
                 {formData.items.map((item, index) => (
-                  <tr key={index} className="border-t border-gray-600">
+                  <tr key={index} className="border-t border-gray-700">
                     <td className="px-4 py-2 text-white">{item.descripcion}</td>
                     <td className="px-4 py-2">
                       <input
@@ -424,7 +424,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
                         min="1"
                         value={item.cantidad}
                         onChange={(e) => handleItemChange(index, 'cantidad', parseInt(e.target.value))}
-                        className="w-20 px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-red-500 focus:outline-none"
+                        className="w-20 px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
                       />
                     </td>
                     <td className="px-4 py-2">
@@ -434,7 +434,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
                         step="0.01"
                         value={item.precio}
                         onChange={(e) => handleItemChange(index, 'precio', parseFloat(e.target.value))}
-                        className="w-24 px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-red-500 focus:outline-none"
+                        className="w-24 px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
                       />
                     </td>
                     <td className="px-4 py-2 text-white">${item.subtotal.toLocaleString()}</td>
@@ -463,7 +463,7 @@ export default function OrdenForm({ orden, onSave, onCancel }: OrdenFormProps) {
         <div className="mt-6 flex justify-end space-x-4">
           <button
             onClick={onCancel}
-            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+            className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-800"
           >
             Cancelar
           </button>

@@ -19,12 +19,12 @@ import {
   safeValidate,
 } from './validation-schemas';
 import { persistentLogger } from './logger-persistente';
-
-// Importar XLSX usando require ya que es una librería CommonJS
-const XLSX = require('xlsx');
+import { ExcelImportService } from './services/ExcelImportService';
+import { getInvoiceParserService } from './services/InvoiceParserService';
 
 let mainWindow: BrowserWindow;
 let dbService: DatabaseService | null = null;
+let excelImportService: ExcelImportService | null = null;
 
 // Desactivar Autofill completamente para evitar mensajes de error benignos en la consola
 // Esto debe hacerse ANTES de que la app esté lista
@@ -33,6 +33,37 @@ app.commandLine.appendSwitch('disable-autofill', '');
 app.commandLine.appendSwitch('disable-ipc-flooding-protection');
 // Suprimir errores de consola de DevTools relacionados con Autofill
 app.commandLine.appendSwitch('disable-dev-shm-usage');
+
+// Interceptar errores de consola del proceso principal para filtrar errores benignos
+const originalStdErrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = (chunk: any, encoding?: any, callback?: any) => {
+  const message = chunk?.toString() || '';
+  
+  // Filtrar errores benignos de DevTools y Autofill
+  const isAutofillError = 
+    message.includes('Request Autofill.enable failed') || 
+    message.includes('Request Autofill.setAddresses failed') ||
+    message.includes("'Autofill.enable' wasn't found") ||
+    message.includes("'Autofill.setAddresses' wasn't found");
+  
+  const isDevToolsError = 
+    message.includes('Unknown VE context') ||
+    message.includes('language-mismatch') ||
+    (message.includes('ERROR:CONSOLE') && (
+      message.includes('devtools://devtools') ||
+      message.includes('Autofill') ||
+      message.includes('VE context')
+    ));
+  
+  if (isAutofillError || isDevToolsError) {
+    // Silenciar estos errores
+    if (callback) callback();
+    return true;
+  }
+  
+  // Para otros errores, escribir normalmente
+  return originalStdErrWrite(chunk, encoding, callback);
+};
 
 // Función helper para obtener rutas correctas
 function getPaths() {
@@ -50,6 +81,39 @@ function getPaths() {
       backupDir: path.join(__dirname, '../../backups')
     };
   }
+}
+
+function getLogDir(): string {
+  return path.join(app.getPath('userData'), 'logs');
+}
+
+function formatLogSize(bytes: number): string {
+  if (!bytes || bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(2)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(2)} MB`;
+}
+
+function getLatestLogFile(prefix: 'app-' | 'error-'): string | null {
+  const logDir = getLogDir();
+  if (!fs.existsSync(logDir)) return null;
+  const files = fs.readdirSync(logDir)
+    .filter(file => file.startsWith(prefix) && file.endsWith('.log'))
+    .map(file => ({
+      name: file,
+      path: path.join(logDir, file),
+      mtime: fs.statSync(path.join(logDir, file)).mtime.getTime()
+    }))
+    .sort((a, b) => b.mtime - a.mtime);
+  return files.length > 0 ? files[0].path : null;
+}
+
+function readLastLines(filePath: string, limit: number): string[] {
+  if (!filePath || !fs.existsSync(filePath)) return [];
+  const content = fs.readFileSync(filePath, 'utf8');
+  const lines = content.split('\n').filter(line => line.trim());
+  return lines.slice(-limit);
 }
 
 async function createWindow(): Promise<void> {
@@ -165,30 +229,64 @@ async function createWindow(): Promise<void> {
     console.error('❌ Error cargando página:', errorCode, errorDescription);
   });
 
-  // Suprimir errores benignos de Autofill en DevTools
-  // Nota: Estos errores son benignos y no afectan la funcionalidad
-  // Son generados por Chromium DevTools al intentar acceder a APIs de Autofill que están deshabilitadas
+  // Suprimir errores benignos de DevTools y otros errores no críticos
   mainWindow.webContents.on('console-message', (event, level, message, sourceId, lineNo) => {
-    // Filtrar errores benignos de Autofill
     const messageStr = String(message || '');
     const sourceIdStr = sourceId ? String(sourceId) : '';
     
+    // Errores de Autofill (benignos)
     const isAutofillError = 
       messageStr.includes('Request Autofill.enable failed') || 
       messageStr.includes('Request Autofill.setAddresses failed') ||
       messageStr.includes('Autofill.enable') ||
       messageStr.includes('Autofill.setAddresses') ||
       messageStr.includes("'Autofill.enable' wasn't found") ||
-      messageStr.includes("'Autofill.setAddresses' wasn't found") ||
-      (sourceIdStr.includes('devtools') && messageStr.includes('Autofill')) ||
-      (sourceIdStr.includes('devtools://devtools') && messageStr.includes('Autofill'));
+      messageStr.includes("'Autofill.setAddresses' wasn't found");
     
-    if (isAutofillError) {
-      // Prevenir que estos mensajes se muestren en la consola
+    // Errores de DevTools internos (benignos)
+    const isDevToolsError = 
+      messageStr.includes('Unknown VE context') ||
+      messageStr.includes('language-mismatch') ||
+      messageStr.includes('devtools://devtools') ||
+      (sourceIdStr.includes('devtools://devtools') && (
+        messageStr.includes('Autofill') ||
+        messageStr.includes('VE context') ||
+        messageStr.includes('visual_logging')
+      ));
+    
+    // Errores de deprecación de Vite (informativos, no críticos)
+    const isViteDeprecation = 
+      messageStr.includes('CJS build of Vite') ||
+      messageStr.includes('deprecated');
+    
+    if (isAutofillError || isDevToolsError || isViteDeprecation) {
       event.preventDefault();
       return;
     }
   });
+  
+  // También interceptar errores de consola del proceso principal de Electron
+  // Estos errores vienen directamente de Chromium/DevTools
+  const originalConsoleError = console.error;
+  console.error = (...args: any[]) => {
+    const message = args.join(' ');
+    
+    // Filtrar errores benignos de DevTools y Autofill
+    const isAutofillError = 
+      message.includes('Request Autofill.enable failed') || 
+      message.includes('Request Autofill.setAddresses failed') ||
+      message.includes("'Autofill.enable' wasn't found") ||
+      message.includes("'Autofill.setAddresses' wasn't found");
+    
+    const isDevToolsError = 
+      message.includes('Unknown VE context') ||
+      message.includes('language-mismatch') ||
+      message.includes('devtools://devtools');
+    
+    if (!isAutofillError && !isDevToolsError) {
+      originalConsoleError.apply(console, args);
+    }
+  };
   
   // También interceptar errores de la consola del renderer usando el evento de errores
   mainWindow.webContents.on('preload-error', (event, preloadPath, error) => {
@@ -218,6 +316,10 @@ app.whenReady().then(() => {
     DatabaseService.create().then(service => {
       dbService = service;
       console.log('✅ Base de datos inicializada');
+      
+      // Inicializar servicio de importación Excel
+      excelImportService = new ExcelImportService();
+      console.log('✅ Servicio de importación Excel inicializado');
     }).catch(error => {
       console.error('❌ Error inicializando base de datos:', error);
     });
@@ -1160,6 +1262,111 @@ ipcMain.handle('get-backups', async () => {
   }
 });
 
+// Handlers para visor y exportación de logs
+ipcMain.handle('get-logs-summary', async () => {
+  try {
+    const logDir = getLogDir();
+    if (!fs.existsSync(logDir)) {
+      return { files: [], recent: { app: [], error: [] }, logDir };
+    }
+
+    const files = fs.readdirSync(logDir)
+      .filter(file => file.endsWith('.log'))
+      .map(file => {
+        const filePath = path.join(logDir, file);
+        const stats = fs.statSync(filePath);
+        return {
+          name: file,
+          size: formatLogSize(stats.size),
+          sizeBytes: stats.size,
+          updatedAt: stats.mtime.toISOString(),
+          createdAt: stats.birthtime.toISOString()
+        };
+      })
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+    const latestAppLog = getLatestLogFile('app-');
+    const latestErrorLog = getLatestLogFile('error-');
+
+    const recentAppLines = latestAppLog ? readLastLines(latestAppLog, 120) : [];
+    const recentErrorLines = latestErrorLog ? readLastLines(latestErrorLog, 120) : [];
+
+    return {
+      files,
+      recent: {
+        app: recentAppLines,
+        error: recentErrorLines
+      },
+      logDir
+    };
+  } catch (error) {
+    console.error('Error obteniendo logs:', error);
+    return {
+      files: [],
+      recent: { app: [], error: [] },
+      logDir: getLogDir(),
+      error: error instanceof Error ? error.message : 'Error desconocido'
+    };
+  }
+});
+
+ipcMain.handle('open-logs-folder', async () => {
+  try {
+    const logDir = getLogDir();
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    const result = await shell.openPath(logDir);
+    if (result) {
+      return { success: false, error: result };
+    }
+    return { success: true, path: logDir };
+  } catch (error) {
+    console.error('Error abriendo carpeta de logs:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+});
+
+ipcMain.handle('export-logs', async () => {
+  try {
+    const logDir = getLogDir();
+    if (!fs.existsSync(logDir)) {
+      return { success: false, error: 'No existen logs para exportar' };
+    }
+
+    const logFiles = fs.readdirSync(logDir).filter(file => file.endsWith('.log'));
+    if (logFiles.length === 0) {
+      return { success: false, error: 'No existen logs para exportar' };
+    }
+
+    const result = await dialog.showOpenDialog({
+      title: 'Seleccionar carpeta de destino',
+      properties: ['openDirectory', 'createDirectory']
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+
+    const destinationRoot = result.filePaths[0];
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const exportDir = path.join(destinationRoot, `ResortesPuertoMontt-logs-${timestamp}`);
+
+    fs.mkdirSync(exportDir, { recursive: true });
+
+    for (const file of logFiles) {
+      const srcPath = path.join(logDir, file);
+      const destPath = path.join(exportDir, file);
+      fs.copyFileSync(srcPath, destPath);
+    }
+
+    return { success: true, path: exportDir, files: logFiles.length };
+  } catch (error) {
+    console.error('Error exportando logs:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+});
+
 // Handlers para importación de datos
 ipcMain.handle('importar-repuestos', async (event, datos) => {
   try {
@@ -1193,6 +1400,32 @@ ipcMain.handle('limpiar-repuestos', async () => {
   }
 });
 
+ipcMain.handle('limpiar-servicios', async () => {
+  try {
+    await ensureDbService().limpiarServicios();
+    return { success: true, message: 'Servicios eliminados exitosamente' };
+  } catch (error) {
+    console.error('Error limpiando servicios:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido'
+    };
+  }
+});
+
+ipcMain.handle('limpiar-clientes', async () => {
+  try {
+    await ensureDbService().limpiarClientes();
+    return { success: true, message: 'Clientes eliminados exitosamente' };
+  } catch (error) {
+    console.error('Error limpiando clientes:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido'
+    };
+  }
+});
+
 ipcMain.handle('obtener-estadisticas-repuestos', async () => {
   try {
     const estadisticas = await ensureDbService().obtenerEstadisticasRepuestos();
@@ -1209,13 +1442,25 @@ ipcMain.handle('obtener-estadisticas-repuestos', async () => {
 });
 
 // Handler para abrir diálogo y procesar archivo Excel e importar repuestos
+// Migrado a ExcelImportService para mayor seguridad (reemplaza xlsx por exceljs)
 ipcMain.handle('procesar-excel-repuestos', async (event) => {
+  persistentLogger.info('📥 IPC: procesar-excel-repuestos - Iniciando');
+  
   try {
+    // Validar que el servicio esté inicializado
+    if (!excelImportService) {
+      excelImportService = new ExcelImportService();
+    }
+
+    if (!dbService) {
+      throw new Error('Base de datos no inicializada. Por favor, espera unos segundos e intenta nuevamente.');
+    }
+
     // Abrir diálogo de selección de archivo
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Seleccionar archivo Excel para importar',
       filters: [
-        { name: 'Archivos Excel', extensions: ['xlsx', 'xls', 'csv'] },
+        { name: 'Archivos Excel', extensions: ['xlsx', 'xls'] },
         { name: 'Todos los archivos', extensions: ['*'] }
       ],
       properties: ['openFile']
@@ -1230,218 +1475,429 @@ ipcMain.handle('procesar-excel-repuestos', async (event) => {
     }
 
     const filePath = result.filePaths[0];
-    console.log('Procesando archivo Excel:', filePath);
-    
-    if (!fs.existsSync(filePath)) {
-      throw new Error('El archivo no existe');
+    persistentLogger.info(`📥 IPC: procesar-excel-repuestos - Archivo seleccionado: ${filePath}`);
+
+    // Procesar archivo usando ExcelImportService (seguro)
+    const importResult = await excelImportService.processExcelFile(filePath);
+
+    // Validar que hay datos válidos
+    if (importResult.datosValidos.length === 0) {
+      return {
+        success: false,
+        error: 'No se encontraron repuestos válidos en el archivo Excel. ' +
+               `Total procesados: ${importResult.totalProcesados}, Errores: ${importResult.totalErrores}`,
+        cantidad: 0,
+        erroresDetallados: importResult.erroresDetallados.slice(0, 10) // Primeros 10 errores
+      };
     }
-
-    // Leer el archivo Excel
-    const workbook = XLSX.readFile(filePath);
-    const sheetNames = workbook.SheetNames;
-    console.log('Hojas disponibles:', sheetNames);
-
-    // Intentar detectar el formato del Excel
-    let worksheet = null;
-    let formato = 'plantilla'; // Por defecto asumimos plantilla
-
-    // Buscar hoja "Repuestos" o "COD SAP MANG "
-    if (sheetNames.includes('Repuestos')) {
-      worksheet = workbook.Sheets['Repuestos'];
-      formato = 'plantilla';
-    } else if (sheetNames.includes('COD SAP MANG ')) {
-      worksheet = workbook.Sheets['COD SAP MANG '];
-      formato = 'inventario';
-    } else if (sheetNames.length > 0) {
-      // Usar la primera hoja disponible
-      worksheet = workbook.Sheets[sheetNames[0]];
-      formato = 'plantilla';
-    }
-
-    if (!worksheet) {
-      throw new Error('No se encontró una hoja válida en el archivo Excel');
-    }
-
-    // Convertir a JSON con headers para detectar columnas dinámicamente
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
-    if (!jsonData || jsonData.length < 2) {
-      throw new Error('El archivo Excel no contiene suficientes datos');
-    }
-
-    // Detectar headers en la primera fila
-    const headerRow: any = jsonData[0];
-    const headers: { [key: string]: number } = {};
-    
-    // Mapear headers a índices de columna según la estructura exacta del Excel:
-    // SKU, Nombre, Categoría, Estado, Precio Unitario (precio uni), Precio Costo
-    headerRow.forEach((header: any, index: number) => {
-      if (header) {
-        const headerLower = String(header).toLowerCase().trim();
-        
-        // SKU (código del producto) - priorizar "sku" exacto
-        if (headerLower === 'sku') {
-          if (!headers['codigo']) headers['codigo'] = index;
-        } else if (headerLower === 'codigo' || headerLower === 'código' || headerLower === 'cod man') {
-          if (!headers['codigo']) headers['codigo'] = index;
-        } else if (headerLower.includes('sku') || headerLower.includes('codigo') || headerLower.includes('código')) {
-          if (!headers['codigo']) headers['codigo'] = index;
-        }
-        
-        // Nombre (nombre completo del producto)
-        if (headerLower === 'nombre' || headerLower === 'name') {
-          headers['nombre'] = index;
-        } else if (headerLower.includes('nombre') && !headerLower.includes('descripcion')) {
-          if (!headers['nombre']) headers['nombre'] = index;
-        }
-        
-        // Descripción (opcional, puede no estar en el Excel)
-        if (headerLower === 'descripcion' || headerLower === 'descripción' || headerLower === 'description') {
-          if (!headers['descripcion']) headers['descripcion'] = index;
-        } else if (headerLower.includes('descripcion') || headerLower.includes('descripción')) {
-          if (!headers['descripcion']) headers['descripcion'] = index;
-        }
-        
-        // Categoría
-        if (headerLower === 'categoria' || headerLower === 'categoría' || headerLower === 'category') {
-          headers['categoria'] = index;
-        } else if (headerLower.includes('categoria') || headerLower.includes('categoría')) {
-          if (!headers['categoria']) headers['categoria'] = index;
-        }
-        
-        // Estado (ignorar, no tiene información según el usuario)
-        // No se mapea
-        
-        // Precio Unitario (precio de venta) - buscar "precio uni" o "precio unitario" primero
-        if (headerLower === 'precio uni' || headerLower === 'precio unit' || headerLower === 'precio unitario') {
-          headers['precio'] = index;
-        } else if (headerLower === 'precio venta' || headerLower === 'precio de venta') {
-          headers['precio'] = index;
-        } else if (headerLower === 'precio' || headerLower === 'price') {
-          // Solo usar "precio" como precio de venta si no hay "precio costo" ya detectado
-          if (!headers['precioCosto'] && !headers['precio']) {
-            headers['precio'] = index;
-          }
-        } else if (headerLower.includes('precio') && !headerLower.includes('costo') && !headerLower.includes('uni')) {
-          if (!headers['precio'] && !headers['precioCosto']) headers['precio'] = index;
-        }
-        
-        // Precio Costo (precio de compra) - buscar "precio costo" exacto
-        if (headerLower === 'precio costo' || headerLower === 'precio de costo') {
-          headers['precioCosto'] = index;
-        } else if (headerLower === 'costo' && !headers['precioCosto']) {
-          // Solo usar "costo" si no hay "precio costo" ya detectado
-          headers['precioCosto'] = index;
-        } else if (headerLower.includes('precio') && headerLower.includes('costo')) {
-          if (!headers['precioCosto']) headers['precioCosto'] = index;
-        }
-        
-        // Stock
-        if (headerLower.includes('stock') && !headerLower.includes('minimo') && !headerLower.includes('mínimo')) {
-          if (!headers['stock']) headers['stock'] = index;
-        }
-        
-        // Stock Mínimo
-        if (headerLower.includes('stock') && (headerLower.includes('minimo') || headerLower.includes('mínimo'))) {
-          headers['stockMinimo'] = index;
-        }
-        
-        // Marca
-        if (headerLower === 'marca' || headerLower === 'brand') {
-          headers['marca'] = index;
-        } else if (headerLower.includes('marca')) {
-          if (!headers['marca']) headers['marca'] = index;
-        }
-        
-        // Ubicación
-        if (headerLower === 'ubicacion' || headerLower === 'ubicación' || headerLower === 'location') {
-          headers['ubicacion'] = index;
-        } else if (headerLower.includes('ubicacion') || headerLower.includes('ubicación')) {
-          if (!headers['ubicacion']) headers['ubicacion'] = index;
-        }
-      }
-    });
-
-    console.log('Headers detectados:', headers);
-
-    const repuestos: any[] = [];
-
-    // Procesar filas de datos (empezar desde la fila 1, saltando el header)
-    for (let i = 1; i < jsonData.length; i++) {
-      const row: any = jsonData[i];
-      if (!row || row.length === 0) continue;
-
-      // Extraer datos según los headers detectados
-      // Estructura del Excel: SKU, Nombre, Categoría, Estado, Precio Unitario (precio uni), Precio Costo
-      const codigo = headers['codigo'] !== undefined && row[headers['codigo']] !== undefined 
-        ? String(row[headers['codigo']]).trim() : '';
-      const nombre = headers['nombre'] !== undefined && row[headers['nombre']] !== undefined 
-        ? String(row[headers['nombre']]).trim() : '';
-      // Usar el nombre completo como descripción si no hay columna de descripción
-      const descripcion = headers['descripcion'] !== undefined && row[headers['descripcion']] !== undefined 
-        ? String(row[headers['descripcion']]).trim() : nombre; // Usar nombre completo como descripción
-      const categoriaRaw = headers['categoria'] !== undefined && row[headers['categoria']] !== undefined 
-        ? String(row[headers['categoria']]).trim() : '';
-      const categoria = categoriaRaw || 'General'; // Solo usar 'General' si realmente está vacío
-      
-      // Precio de venta (Precio Unitario / "precio uni" del Excel)
-      const precio = headers['precio'] !== undefined && row[headers['precio']] !== undefined 
-        ? parseFloat(String(row[headers['precio']]).replace(/[^0-9.,-]/g, '').replace(',', '.')) || 0 : 0;
-      
-      // Precio de costo (Precio Costo del Excel - valor que compra el dueño del taller)
-      const precioCosto = headers['precioCosto'] !== undefined && row[headers['precioCosto']] !== undefined 
-        ? parseFloat(String(row[headers['precioCosto']]).replace(/[^0-9.,-]/g, '').replace(',', '.')) || 0 : 0;
-      
-      // Stock y stock mínimo (pueden no estar en el Excel, usar 0 por defecto)
-      const stock = headers['stock'] !== undefined && row[headers['stock']] !== undefined 
-        ? parseInt(String(row[headers['stock']])) || 0 : 0;
-      const stockMinimo = headers['stockMinimo'] !== undefined && row[headers['stockMinimo']] !== undefined 
-        ? parseInt(String(row[headers['stockMinimo']])) || 0 : 0;
-      
-      // Marca y ubicación (pueden no estar en el Excel)
-      const marca = headers['marca'] !== undefined && row[headers['marca']] !== undefined 
-        ? String(row[headers['marca']]).trim() : '';
-      const ubicacion = headers['ubicacion'] !== undefined && row[headers['ubicacion']] !== undefined 
-        ? String(row[headers['ubicacion']]).trim() : 'Almacén';
-
-      // Solo agregar si tiene código (SKU) o nombre (al menos uno es requerido)
-      if (codigo || nombre) {
-        repuestos.push({
-          codigo: codigo || `SKU-${nombre.substring(0, 15)}`, // Usar nombre como código si no hay SKU
-          nombre: nombre || codigo, // Usar nombre completo del Excel
-          descripcion: descripcion || nombre || codigo, // Usar nombre completo como descripción
-          precio, // Precio de venta (Precio Unitario / "precio uni" del Excel)
-          precioCosto, // Precio de costo (Precio Costo del Excel - valor de compra)
-          stock,
-          stockMinimo,
-          categoria: categoria || 'General', // Categoría del Excel
-          marca,
-          ubicacion,
-          activo: true
-        });
-      }
-    }
-
-    if (repuestos.length === 0) {
-      throw new Error('No se encontraron repuestos válidos en el archivo Excel');
-    }
-
-    console.log(`Procesados ${repuestos.length} repuestos del Excel`);
 
     // Guardar en la base de datos
-    await ensureDbService().importarRepuestosDesdeJSON(repuestos);
+    // Nota: importarRepuestosDesdeJSON espera un array de objetos con la estructura de Repuesto
+    // Los datos ya están validados por Zod en ExcelImportService
+    await ensureDbService().importarRepuestosDesdeJSON(importResult.datosValidos);
+
+    persistentLogger.info(
+      `✅ IPC: procesar-excel-repuestos - Importación exitosa. ` +
+      `Válidos: ${importResult.datosValidos.length}, Errores: ${importResult.totalErrores}`
+    );
 
     return {
       success: true,
-      message: `Se importaron ${repuestos.length} repuestos exitosamente`,
-      cantidad: repuestos.length
+      message: `Se importaron ${importResult.datosValidos.length} repuestos exitosamente. ` +
+               (importResult.totalErrores > 0 
+                 ? `${importResult.totalErrores} filas tuvieron errores y fueron omitidas.` 
+                 : ''),
+      cantidad: importResult.datosValidos.length,
+      totalProcesados: importResult.totalProcesados,
+      totalErrores: importResult.totalErrores,
+      erroresDetallados: importResult.totalErrores > 0 
+        ? importResult.erroresDetallados.slice(0, 10) // Primeros 10 errores para mostrar
+        : []
     };
+
   } catch (error) {
-    console.error('Error procesando Excel:', error);
+    // Manejo robusto de errores con mensajes amigables
+    let errorMessage = 'Error desconocido al procesar el archivo Excel';
+    
+    if (error instanceof Error) {
+      // Errores específicos con mensajes amigables
+      if (error.message.includes('timeout') || error.message.includes('Timeout')) {
+        errorMessage = 'El archivo tardó demasiado en procesarse. Por favor, intenta con un archivo más pequeño o verifica que no esté corrupto.';
+      } else if (error.message.includes('corrupto') || error.message.includes('corrupt')) {
+        errorMessage = 'El archivo Excel está corrupto o no es un archivo válido. Por favor, verifica el archivo e intenta nuevamente.';
+      } else if (error.message.includes('password') || error.message.includes('contraseña')) {
+        errorMessage = 'El archivo Excel está protegido con contraseña. Por favor, desprotege el archivo antes de importarlo.';
+      } else if (error.message.includes('firma') || error.message.includes('signature')) {
+        errorMessage = 'El archivo no es un archivo Excel válido. Por favor, verifica que el archivo tenga extensión .xlsx o .xls';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+
+    persistentLogger.error('❌ IPC: procesar-excel-repuestos - Error:', error);
+    
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Error desconocido al procesar el archivo Excel',
+      error: errorMessage,
       cantidad: 0
     };
+  }
+});
+
+ipcMain.handle('procesar-excel-servicios', async () => {
+  persistentLogger.info('📥 IPC: procesar-excel-servicios - Iniciando');
+
+  try {
+    if (!excelImportService) {
+      excelImportService = new ExcelImportService();
+    }
+
+    if (!dbService) {
+      throw new Error('Base de datos no inicializada. Por favor, espera unos segundos e intenta nuevamente.');
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Seleccionar archivo Excel para importar servicios',
+      filters: [
+        { name: 'Archivos Excel', extensions: ['xlsx', 'xls'] },
+        { name: 'Todos los archivos', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return {
+        success: false,
+        error: 'No se seleccionó ningún archivo',
+        cantidad: 0
+      };
+    }
+
+    const filePath = result.filePaths[0];
+    persistentLogger.info(`📥 IPC: procesar-excel-servicios - Archivo seleccionado: ${filePath}`);
+
+    const importResult = await excelImportService.processServiciosFile(filePath);
+    if (importResult.datosValidos.length === 0) {
+      return {
+        success: false,
+        error: 'No se encontraron servicios válidos en el archivo Excel. ' +
+               `Total procesados: ${importResult.totalProcesados}, Errores: ${importResult.totalErrores}`,
+        cantidad: 0,
+        erroresDetallados: importResult.erroresDetallados.slice(0, 10)
+      };
+    }
+
+    let errores = 0;
+    for (const servicio of importResult.datosValidos) {
+      try {
+        await ensureDbService().saveServicio(servicio as any);
+      } catch (error) {
+        errores++;
+        console.error('Error guardando servicio importado:', error);
+      }
+    }
+
+    return {
+      success: true,
+      cantidad: importResult.datosValidos.length,
+      errores
+    };
+  } catch (error) {
+    console.error('Error procesando Excel de servicios:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+      cantidad: 0
+    };
+  }
+});
+
+ipcMain.handle('procesar-excel-clientes', async () => {
+  persistentLogger.info('📥 IPC: procesar-excel-clientes - Iniciando');
+
+  try {
+    if (!excelImportService) {
+      excelImportService = new ExcelImportService();
+    }
+
+    if (!dbService) {
+      throw new Error('Base de datos no inicializada. Por favor, espera unos segundos e intenta nuevamente.');
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Seleccionar archivo Excel para importar clientes',
+      filters: [
+        { name: 'Archivos Excel', extensions: ['xlsx', 'xls'] },
+        { name: 'Todos los archivos', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return {
+        success: false,
+        error: 'No se seleccionó ningún archivo',
+        cantidad: 0
+      };
+    }
+
+    const filePath = result.filePaths[0];
+    persistentLogger.info(`📥 IPC: procesar-excel-clientes - Archivo seleccionado: ${filePath}`);
+
+    const importResult = await excelImportService.processClientesFile(filePath);
+    if (importResult.datosValidos.length === 0) {
+      return {
+        success: false,
+        error: 'No se encontraron clientes válidos en el archivo Excel. ' +
+               `Total procesados: ${importResult.totalProcesados}, Errores: ${importResult.totalErrores}`,
+        cantidad: 0,
+        erroresDetallados: importResult.erroresDetallados.slice(0, 10)
+      };
+    }
+
+    let errores = 0;
+    for (const cliente of importResult.datosValidos) {
+      try {
+        await ensureDbService().saveCliente(cliente as any);
+      } catch (error) {
+        errores++;
+        console.error('Error guardando cliente importado:', error);
+      }
+    }
+
+    return {
+      success: true,
+      cantidad: importResult.datosValidos.length,
+      errores
+    };
+  } catch (error) {
+    console.error('Error procesando Excel de clientes:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+      cantidad: 0
+    };
+  }
+});
+
+// Handler para escanear factura con OCR
+ipcMain.handle('scan-invoice', async (event) => {
+  persistentLogger.info('📥 IPC: scan-invoice - Iniciando');
+  
+  try {
+    if (!dbService) {
+      throw new Error('Base de datos no inicializada. Por favor, espera unos segundos e intenta nuevamente.');
+    }
+
+    // Abrir diálogo de selección de archivo (PDF o imagen)
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Seleccionar factura para procesar (PDF o Imagen)',
+      filters: [
+        { name: 'PDFs', extensions: ['pdf'] },
+        { name: 'Imágenes', extensions: ['jpg', 'jpeg', 'png', 'bmp'] },
+        { name: 'Todos los archivos', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return {
+        success: false,
+        error: 'No se seleccionó ninguna imagen',
+        items: [],
+        textoCompleto: '',
+        imagenProcesada: null
+      };
+    }
+
+    const filePath = result.filePaths[0];
+    persistentLogger.info(`📥 IPC: scan-invoice - Archivo seleccionado: ${filePath}`);
+
+    // Obtener servicio de parser (híbrido: PDF + OCR)
+    const parserService = getInvoiceParserService();
+    
+    // Parsear factura (detecta automáticamente PDF o imagen)
+    const parseResult = await parserService.parseInvoice(filePath);
+
+    // Convertir imagen procesada a base64 para enviar al renderer (solo si es imagen)
+    let imagenProcesadaBase64: string | null = null;
+    if (parseResult.imagenProcesada) {
+      imagenProcesadaBase64 = `data:image/png;base64,${parseResult.imagenProcesada.toString('base64')}`;
+    }
+
+    // Leer archivo original para enviar al renderer
+    let imagenOriginalBase64: string | null = null;
+    try {
+      const extension = path.extname(filePath).toLowerCase();
+      
+      // Solo leer como imagen si no es PDF
+      if (extension !== '.pdf') {
+        const imagenOriginal = fs.readFileSync(filePath);
+        const mimeType = extension === '.png' ? 'image/png' : 
+                         extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : 
+                         'image/png';
+        imagenOriginalBase64 = `data:${mimeType};base64,${imagenOriginal.toString('base64')}`;
+      }
+    } catch (error) {
+      persistentLogger.warn('No se pudo leer archivo original para preview:', error);
+    }
+
+    persistentLogger.info(
+      `✅ IPC: scan-invoice - Parseo completado. ` +
+      `Tipo: ${parseResult.sourceType}, Items: ${parseResult.items.length}, Baja confianza: ${parseResult.totalConBajaConfianza}`
+    );
+
+    return {
+      success: true,
+      items: parseResult.items,
+      textoCompleto: parseResult.textoCompleto,
+      imagenOriginal: imagenOriginalBase64,
+      imagenProcesada: imagenProcesadaBase64,
+      totalProcesados: parseResult.totalProcesados,
+      totalConBajaConfianza: parseResult.totalConBajaConfianza,
+      errores: parseResult.errores,
+      sourceType: parseResult.sourceType
+    };
+
+  } catch (error) {
+    let errorMessage = 'Error desconocido al escanear la factura';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('No se pudo extraer texto')) {
+        errorMessage = 'No se pudo extraer texto de la imagen. Por favor, verifica que la imagen sea clara y legible.';
+      } else if (error.message.includes('corrupto') || error.message.includes('corrupt')) {
+        errorMessage = 'La imagen está corrupta o no es un archivo válido. Por favor, verifica el archivo e intenta nuevamente.';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+
+    persistentLogger.error('❌ IPC: scan-invoice - Error:', error);
+    
+    return {
+      success: false,
+      error: errorMessage,
+      items: [],
+      textoCompleto: '',
+      imagenOriginal: null,
+      imagenProcesada: null,
+      sourceType: 'image'
+    };
+  }
+});
+
+// ========== HANDLERS PARA CAJA DIARIA ==========
+
+ipcMain.handle('get-estado-caja', async () => {
+  try {
+    const estado = await ensureDbService().getEstadoCaja();
+    return estado;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-estado-caja - Error:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('abrir-caja', async (_event, montoInicial: number, observaciones?: string) => {
+  try {
+    const estado = await ensureDbService().abrirCaja(montoInicial, observaciones);
+    return estado;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: abrir-caja - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('cerrar-caja', async (_event, montoFinal: number, observaciones?: string) => {
+  try {
+    const estado = await ensureDbService().cerrarCaja(montoFinal, observaciones);
+    return estado;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: cerrar-caja - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('registrar-movimiento-caja', async (_event, movimiento: any) => {
+  try {
+    const mov = await ensureDbService().registrarMovimientoCaja(movimiento);
+    return mov;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: registrar-movimiento-caja - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('get-movimientos-caja-por-fecha', async (_event, fecha: string) => {
+  try {
+    const movimientos = await ensureDbService().getMovimientosCajaPorFecha(fecha);
+    return movimientos;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-movimientos-caja-por-fecha - Error:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('get-arqueo-caja', async (_event, fecha: string) => {
+  try {
+    const arqueo = await ensureDbService().getArqueoCaja(fecha);
+    return arqueo;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-arqueo-caja - Error:', error);
+    throw error;
+  }
+});
+
+// ========== HANDLERS PARA COMISIONES DE TÉCNICOS ==========
+
+ipcMain.handle('calcular-y-guardar-comision', async (_event, ordenId: number, tecnicoId: number | null, tecnicoNombre: string, porcentajeComision: number) => {
+  try {
+    const comision = await ensureDbService().calcularYGuardarComision(ordenId, tecnicoId, tecnicoNombre, porcentajeComision);
+    return comision;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: calcular-y-guardar-comision - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('get-reporte-comisiones', async (_event, mes: string) => {
+  try {
+    const comisiones = await ensureDbService().getReporteComisiones(mes);
+    return comisiones;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-reporte-comisiones - Error:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('get-resumen-comisiones-por-tecnico', async (_event, mes: string) => {
+  try {
+    const resumen = await ensureDbService().getResumenComisionesPorTecnico(mes);
+    return resumen;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-resumen-comisiones-por-tecnico - Error:', error);
+    return [];
+  }
+});
+
+// ========== HANDLERS PARA AGENDA ==========
+
+ipcMain.handle('update-fecha-programada', async (_event, ordenId: number, fechaProgramada: string) => {
+  try {
+    const orden = await ensureDbService().actualizarFechaProgramada(ordenId, fechaProgramada);
+    return { success: true, data: orden };
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: update-fecha-programada - Error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-ordenes-para-agenda', async (_event, fechaInicio: string, fechaFin: string) => {
+  try {
+    const ordenes = await ensureDbService().getOrdenesParaAgenda(fechaInicio, fechaFin);
+    return ordenes;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-ordenes-para-agenda - Error:', error);
+    return [];
   }
 });

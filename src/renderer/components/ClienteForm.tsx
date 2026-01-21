@@ -2,6 +2,7 @@ import React, { useState, useEffect, startTransition, useRef } from 'react';
 import { X, User, Mail, Phone, MapPin, Plus, Trash2, ChevronLeft, ChevronRight, Save } from 'lucide-react';
 import { Cliente, Vehiculo } from '../types';
 import { notify, Logger, formatearRUT } from '../utils/cn';
+import { ActionDialog } from './ActionDialog';
 
 interface ClienteFormProps {
   cliente?: Cliente;
@@ -149,6 +150,7 @@ export default function ClienteForm({
         modelo: '', 
         año: new Date().getFullYear(), 
         patente: '', 
+        numeroChasis: '',
         color: '', 
         kilometraje: 0, 
         activo: true
@@ -252,42 +254,16 @@ export default function ClienteForm({
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" 
-      onClick={onClose}
-      onPointerDown={(e) => {
-        // Solo cerrar si se hace click directamente en el overlay, no en el contenido
-        if (e.target === e.currentTarget) {
-          onClose();
-        }
-      }}
-      style={{ pointerEvents: 'auto' }}
+    <ActionDialog
+      open={isOpen}
+      onOpenChange={onClose}
+      variant="slide-over"
+      size="lg"
+      title={title}
+      description={subtitle}
     >
-      <div 
-        className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4" 
-        onClick={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{ pointerEvents: 'auto' }}
-      >
-        {/* Header */}
-        <div className="flex justify-between items-start p-6 border-b border-gray-200">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-            <p className="text-sm text-gray-600 mt-1">{subtitle}</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-            title="Cerrar formulario"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
+      <div className="h-full">
         {/* Form */}
         <form className="p-6 space-y-4">
           {/* Error general */}
@@ -421,11 +397,12 @@ export default function ClienteForm({
               </div>
               {vehiculos.length === 0 && (<p className="text-sm text-gray-500">No hay vehículos. Usa "Agregar vehículo" para añadir.</p>)}
               {vehiculos.map((v, idx) => (
-                <div key={idx} className="grid grid-cols-6 gap-2 items-center border rounded-md p-3">
+                <div key={idx} className="grid grid-cols-7 gap-2 items-center border rounded-md p-3">
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Marca" value={v.marca} onChange={e => updateVehiculo(idx, 'marca', e.target.value)} />
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Modelo" value={v.modelo} onChange={e => updateVehiculo(idx, 'modelo', e.target.value)} />
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Año" type="number" value={v.año} onChange={e => updateVehiculo(idx, 'año', Number(e.target.value))} />
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Patente" value={v.patente} onChange={e => updateVehiculo(idx, 'patente', e.target.value)} />
+                  <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="N° Chasis" value={v.numeroChasis || ''} onChange={e => updateVehiculo(idx, 'numeroChasis', e.target.value)} />
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Color" value={v.color || ''} onChange={e => updateVehiculo(idx, 'color', e.target.value)} />
                   <div className="col-span-1 flex items-center justify-end">
                     <button type="button" className="p-2 hover:bg-gray-100 rounded" onClick={() => removeVehiculo(idx)} title="Eliminar"><Trash2 className="h-4 w-4 text-red-600"/></button>
@@ -463,6 +440,6 @@ export default function ClienteForm({
           </div>
         </form>
       </div>
-    </div>
+    </ActionDialog>
   );
 }

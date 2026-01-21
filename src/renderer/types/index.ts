@@ -27,6 +27,7 @@ export interface Vehiculo {
   modelo: string;
   año: number;
   patente: string;
+  numeroChasis?: string;
   color?: string;
   kilometraje?: number;
   observaciones?: string;

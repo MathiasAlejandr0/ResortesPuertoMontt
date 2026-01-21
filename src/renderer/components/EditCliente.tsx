@@ -71,7 +71,7 @@ export default function EditCliente({ cliente, onSave, onCancel }: EditClientePr
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-black rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-white">
             {cliente ? 'Editar Cliente' : 'Nuevo Cliente'}
@@ -95,7 +95,7 @@ export default function EditCliente({ cliente, onSave, onCancel }: EditClientePr
                 type="text"
                 value={formData.nombre}
                 onChange={(e) => handleInputChange('nombre', e.target.value)}
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+                className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
                 placeholder="Nombre completo del cliente"
               />
             </div>
@@ -109,7 +109,7 @@ export default function EditCliente({ cliente, onSave, onCancel }: EditClientePr
                   const formatted = formatearRUT(e.target.value);
                   handleInputChange('rut', formatted);
                 }}
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+                className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
                 placeholder="12.345.678-9"
               />
             </div>
@@ -120,7 +120,7 @@ export default function EditCliente({ cliente, onSave, onCancel }: EditClientePr
                 type="text"
                 value={formData.telefono}
                 onChange={(e) => handleInputChange('telefono', e.target.value)}
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+                className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
                 placeholder="+56 9 1234 5678"
               />
             </div>
@@ -131,7 +131,7 @@ export default function EditCliente({ cliente, onSave, onCancel }: EditClientePr
                 type="email"
                 value={formData.email || ''}
                 onChange={(e) => handleInputChange('email', e.target.value)}
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+                className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
                 placeholder="cliente@email.com"
               />
             </div>
@@ -141,7 +141,7 @@ export default function EditCliente({ cliente, onSave, onCancel }: EditClientePr
               <textarea
                 value={formData.direccion || ''}
                 onChange={(e) => handleInputChange('direccion', e.target.value)}
-                className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
+                className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 focus:border-red-500 focus:outline-none"
                 rows={3}
                 placeholder="Dirección completa"
               />
@@ -279,7 +279,7 @@ function VehiculoForm({ vehiculo, clienteId, onSave, onCancel }: VehiculoFormPro
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl">
+      <div className="bg-black rounded-lg p-6 w-full max-w-2xl">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xl font-bold text-white">
             {vehiculo ? 'Editar Vehículo' : 'Nuevo Vehículo'}

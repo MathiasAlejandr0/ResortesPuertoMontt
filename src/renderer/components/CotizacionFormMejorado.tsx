@@ -3,11 +3,13 @@ import { X, User, Car, Calendar, DollarSign, Plus, Search, FileText, Send, Eye, 
 import { Cliente, Vehiculo, Cotizacion, Repuesto } from '../types';
 import { useApp } from '../contexts/AppContext';
 import { notify, Logger, formatearRUT } from '../utils/cn';
+import { ActionDialog } from './ActionDialog';
 
 interface CotizacionFormProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (cotizacion: Cotizacion) => void;
+  fullPage?: boolean;
 }
 
 interface RepuestoCotizacion {
@@ -22,7 +24,8 @@ interface RepuestoCotizacion {
 export default function CotizacionFormMejorado({ 
   isOpen, 
   onClose, 
-  onSave
+  onSave,
+  fullPage = false
 }: CotizacionFormProps) {
   // Usar el contexto para acceder a los datos
   const { clientes, vehiculos, repuestos, addCliente, addVehiculo, refreshRepuestos } = useApp();
@@ -46,6 +49,7 @@ export default function CotizacionFormMejorado({
     modelo: '',
     año: new Date().getFullYear(),
     patente: '',
+    numeroChasis: '',
     color: '',
     kilometraje: 0,
     observaciones: '',
@@ -101,6 +105,7 @@ export default function CotizacionFormMejorado({
         modelo: '',
         año: new Date().getFullYear(),
         patente: '',
+        numeroChasis: '',
         color: '',
         kilometraje: 0,
         observaciones: '',
@@ -511,38 +516,21 @@ export default function CotizacionFormMejorado({
     }
   };
 
+  // Si no está abierto, no renderizar nada
   if (!isOpen) return null;
 
-  return (
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" 
-      onClick={onClose}
-      style={{ pointerEvents: 'auto' }}
-    >
-      <div 
-        className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" 
-        onClick={(e) => e.stopPropagation()}
-        style={{ pointerEvents: 'auto' }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-              <FileText className="h-5 w-5 text-red-600" />
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">Nueva Cotización</h2>
-              <p className="text-sm text-gray-500">Paso {step} de 4</p>
-            </div>
+  // Contenido del formulario (reutilizable para ambos modos)
+  const formContent = (
+    <div className="h-full">
+        {/* Header interno con información del paso */}
+        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-200">
+          <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+            <FileText className="h-5 w-5 text-red-600" />
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-            title="Cerrar formulario"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Nueva Cotización</h2>
+            <p className="text-sm text-gray-500">Paso {step} de 4</p>
+          </div>
         </div>
 
         {/* Progress Bar */}
@@ -613,8 +601,8 @@ export default function CotizacionFormMejorado({
 
                 {tipoCliente === 'existente' ? (
                   <div className="space-y-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <p className="text-sm text-blue-800">
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <p className="text-sm text-red-800">
                         <strong>💡 Buscar Cliente:</strong> Selecciona un cliente existente de la lista. 
                         Si no encuentras el cliente, cambia a "Nuevo Cliente" para ingresar sus datos.
                       </p>
@@ -863,6 +851,19 @@ export default function CotizacionFormMejorado({
                         placeholder="Corolla"
                       />
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">N° Chasis</label>
+                      <input
+                        type="text"
+                        name="numeroChasis"
+                        value={nuevoVehiculo.numeroChasis || ''}
+                        onChange={(e) => {
+                          setNuevoVehiculo(prev => ({ ...prev, numeroChasis: e.target.value }));
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 pointer-events-auto"
+                        placeholder="Opcional"
+                      />
+                    </div>
                   </div>
                 )}
               </div>
@@ -971,10 +972,10 @@ export default function CotizacionFormMejorado({
 
                 {/* Resumen de Repuestos */}
                 {repuestosSeleccionados.length > 0 && (
-                  <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                  <div className="mt-4 p-4 bg-red-50 rounded-lg">
                     <div className="flex justify-between items-center">
                       <span className="font-medium text-gray-900">Subtotal Repuestos:</span>
-                      <span className="font-bold text-blue-600">${subtotalRepuestos.toLocaleString('es-CL')}</span>
+                      <span className="font-bold text-red-600">${subtotalRepuestos.toLocaleString('es-CL')}</span>
                     </div>
                   </div>
                 )}
@@ -1109,40 +1110,86 @@ export default function CotizacionFormMejorado({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-between items-center p-6 border-t border-gray-200">
-          <button
-            onClick={() => {
-              if (step > 1) {
-                startTransition(() => {
-                  setStep(step - 1);
-                });
-              } else {
-                onClose();
-              }
-            }}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-          >
-            {step > 1 ? 'Anterior' : 'Cancelar'}
-          </button>
-          
-          <div className="flex gap-3">
-            {step < 4 ? (
-              <button
-                onClick={() => {
+        {/* Footer - Solo en modo modal */}
+        {!fullPage && (
+          <div className="flex justify-between items-center p-6 border-t border-gray-200">
+            <button
+              onClick={() => {
+                if (step > 1) {
                   startTransition(() => {
-                    setStep(step + 1);
+                    setStep(step - 1);
                   });
-                }}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
-              >
-                Siguiente
-              </button>
-            ) : (
+                } else {
+                  onClose();
+                }
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            >
+              {step > 1 ? 'Anterior' : 'Cancelar'}
+            </button>
+            
+            <div className="flex gap-3">
+              {step < 4 ? (
+                <button
+                  onClick={() => {
+                    startTransition(() => {
+                      setStep(step + 1);
+                    });
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+                >
+                  Siguiente
+                </button>
+              ) : (
+                <button
+                  onClick={handleSave}
+                  disabled={isLoading}
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      Crear Cotización
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+  );
+
+  // Modo página completa (estilo Dirup)
+  if (fullPage) {
+    return (
+      <div className="flex flex-col h-full bg-white">
+        {/* Header estilo Dirup */}
+        <div className="bg-black text-white px-6 py-4 flex items-center justify-between border-b border-gray-800">
+          <h1 className="text-xl font-semibold">Presupuesto</h1>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => step > 1 ? setStep(step - 1) : onClose()}
+              className="px-4 py-2 text-sm font-medium text-white bg-transparent hover:bg-gray-800 rounded transition-colors"
+            >
+              Volver
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-white bg-transparent hover:bg-gray-800 rounded transition-colors"
+            >
+              Cancelar
+            </button>
+            {step === 4 ? (
               <button
                 onClick={handleSave}
                 disabled={isLoading}
-                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
@@ -1150,16 +1197,42 @@ export default function CotizacionFormMejorado({
                     Guardando...
                   </>
                 ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    Crear Cotización
-                  </>
+                  'Confirmar'
                 )}
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  startTransition(() => {
+                    setStep(step + 1);
+                  });
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded transition-colors"
+              >
+                Siguiente
               </button>
             )}
           </div>
         </div>
+        
+        {/* Contenido del formulario */}
+        <div className="flex-1 overflow-y-auto bg-white p-6">
+          {formContent}
+        </div>
       </div>
-    </div>
+    );
+  }
+
+  // Modo modal (comportamiento original)
+  return (
+    <ActionDialog
+      open={isOpen}
+      onOpenChange={onClose}
+      variant="slide-over"
+      size="xl"
+      title={step === 1 ? "Seleccionar Cliente" : step === 2 ? "Seleccionar Vehículo" : step === 3 ? "Detalles de la Cotización" : "Resumen de la Cotización"}
+    >
+      {formContent}
+    </ActionDialog>
   );
 }

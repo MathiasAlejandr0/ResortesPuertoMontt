@@ -41,7 +41,7 @@ export default function OrdenInterna({
     switch (prioridad?.toLowerCase()) {
       case 'urgente': return 'text-red-600 bg-red-100';
       case 'alta': return 'text-orange-600 bg-orange-100';
-      case 'normal': return 'text-blue-600 bg-blue-100';
+      case 'normal': return 'text-red-600 bg-red-100';
       case 'baja': return 'text-green-600 bg-green-100';
       default: return 'text-gray-600 bg-gray-100';
     }
@@ -50,7 +50,7 @@ export default function OrdenInterna({
   const getEstadoColor = (estado?: string) => {
     switch (estado?.toLowerCase()) {
       case 'completada': return 'text-green-600 bg-green-100';
-      case 'en_proceso': return 'text-blue-600 bg-blue-100';
+      case 'en_proceso': return 'text-red-600 bg-red-100';
       case 'pendiente': return 'text-yellow-600 bg-yellow-100';
       case 'cancelada': return 'text-red-600 bg-red-100';
       default: return 'text-gray-600 bg-gray-100';
@@ -204,8 +204,8 @@ export default function OrdenInterna({
       </div>
 
       {/* Desglose de Costos */}
-      <div className="bg-blue-50 p-6 rounded-lg mb-6">
-        <h3 className="text-lg font-semibold text-blue-600 mb-4 flex items-center gap-2">
+      <div className="bg-red-50 p-6 rounded-lg mb-6">
+        <h3 className="text-lg font-semibold text-red-600 mb-4 flex items-center gap-2">
           <Calculator className="h-5 w-5" />
           Desglose de Costos
         </h3>

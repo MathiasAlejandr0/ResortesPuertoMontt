@@ -18,6 +18,9 @@ interface CotizacionPDFProps {
   nombreTaller: string;
   telefonoTaller: string;
   emailTaller: string;
+  rutTaller?: string;
+  direccionTaller?: string;
+  sitioWebTaller?: string;
 }
 
 export default function CotizacionPDF({ 
@@ -29,7 +32,10 @@ export default function CotizacionPDF({
   observaciones,
   nombreTaller,
   telefonoTaller,
-  emailTaller
+  emailTaller,
+  rutTaller = '',
+  direccionTaller = '',
+  sitioWebTaller = ''
 }: CotizacionPDFProps) {
   
   const generarPDF = () => {
@@ -151,8 +157,12 @@ export default function CotizacionPDF({
       <body>
         <div class="header">
           <div class="logo">${nombreTaller}</div>
-          <p>Servicios de Reparación Automotriz</p>
-          <p>Tel: ${telefonoTaller} | Email: ${emailTaller}</p>
+          ${rutTaller ? `<p style="margin: 5px 0; font-size: 14px;"><strong>RUT:</strong> ${rutTaller}</p>` : ''}
+          ${direccionTaller ? `<p style="margin: 5px 0; font-size: 14px;">${direccionTaller}</p>` : ''}
+          <p style="margin: 10px 0 5px 0; font-size: 14px;">
+            ${telefonoTaller ? `Tel: ${telefonoTaller}` : ''}${telefonoTaller && emailTaller ? ' | ' : ''}${emailTaller ? `Email: ${emailTaller}` : ''}
+          </p>
+          ${sitioWebTaller ? `<p style="margin: 5px 0; font-size: 14px;">${sitioWebTaller}</p>` : ''}
         </div>
 
         <div class="cotizacion-info">
