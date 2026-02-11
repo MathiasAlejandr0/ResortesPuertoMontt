@@ -306,30 +306,53 @@ async function createWindow(): Promise<void> {
 }
 
 // Este método se llamará cuando Electron haya terminado de inicializar
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   persistentLogger.info('🚀 Iniciando aplicación Resortes Puerto Montt...');
   console.log('🚀 Iniciando aplicación Resortes Puerto Montt...');
   console.log('📁 Directorio de trabajo:', process.cwd());
   console.log('📁 Directorio de recursos:', process.resourcesPath);
   console.log('📁 Directorio de aplicación:', app.getAppPath());
-  
+
   try {
-    // Inicializar la base de datos de forma asíncrona
-    console.log('🔧 Inicializando base de datos...');
-    DatabaseService.create().then(service => {
-      dbService = service;
-      console.log('✅ Base de datos inicializada');
-      
-      // Inicializar servicio de importación Excel
-      excelImportService = new ExcelImportService();
-      console.log('✅ Servicio de importación Excel inicializado');
-    }).catch(error => {
-      console.error('❌ Error inicializando base de datos:', error);
-    });
+    // Asegurar que las carpetas de datos y claves existan y sean escribibles (la app no depende del instalador)
+    const userDataPath = app.getPath('userData');
+    const dataDir = path.join(userDataPath, 'data');
+    const keysDir = path.join(userDataPath, 'keys');
+    for (const dir of [dataDir, keysDir]) {
+      if (!fs.existsSync(dir)) {
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+        } catch (mkdirErr) {
+          const msg = mkdirErr instanceof Error ? mkdirErr.message : String(mkdirErr);
+          throw new Error('No se pudo crear la carpeta requerida en ' + dir + ': ' + msg);
+        }
+      }
+    }
+    // Inicializar la base de datos de forma sincrónica antes de crear la ventana
+    console.log('🔧 Inicializando base de datos (primer arranque puede tardar unos segundos)...');
+    dbService = await DatabaseService.create();
+    console.log('✅ Base de datos inicializada');
+
+    // Inicializar servicio de importación Excel
+    excelImportService = new ExcelImportService();
+    console.log('✅ Servicio de importación Excel inicializado');
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errStack = error instanceof Error ? error.stack : '';
     console.error('❌ Error inicializando base de datos:', error);
+    persistentLogger.error('❌ Error inicializando base de datos: ' + errMsg, errStack || '');
+    const detalle = errMsg.length > 180 ? errMsg.slice(0, 180) + '...' : errMsg;
+    await dialog.showErrorBox(
+      'Error al iniciar',
+      'No se pudo preparar la base de datos.\n\n' +
+      'Comprueba que tengas espacio en disco y que el antivirus no esté bloqueando la aplicación. ' +
+      'Si sigue fallando, envía este texto al soporte:\n\n' +
+      detalle
+    );
+    app.quit();
+    return;
   }
-  
+
   console.log('🔧 Creando ventana principal...');
   createWindow();
 

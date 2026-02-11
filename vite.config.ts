@@ -17,12 +17,17 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           // Feature chunks - agrupar páginas relacionadas para code-splitting
+          // taller e inventario comparten dependencias circulares → mismo chunk para evitar warning
           if (id.includes('src/renderer/pages')) {
-            // Taller - módulo de órdenes y trabajo
+            // Taller + Inventario (evita circular chunk: inventario ↔ taller)
             if (id.includes('Ordenes') || id.includes('Cotizaciones') || 
                 id.includes('Agenda') || id.includes('Recordatorios') || 
-                id.includes('Vehiculos') || id.includes('Historico')) {
-              return 'taller';
+                id.includes('Vehiculos') || id.includes('Historico') ||
+                id.includes('Inventario') || id.includes('Productos') || 
+                id.includes('EditorProductos') || id.includes('ServiciosListado') || 
+                id.includes('EditorServicios') || id.includes('CategoriasListado') || 
+                id.includes('Tienda')) {
+              return 'taller-inventario';
             }
             // Caja - módulo de caja diaria
             if (id.includes('CajaDiaria') || id.includes('CierresCaja') || 
@@ -33,13 +38,6 @@ export default defineConfig({
             if (id.includes('SaldosCuentas') || id.includes('MovimientosCuentas') || 
                 id.includes('InformesCuentaCorriente')) {
               return 'cuentas';
-            }
-            // Inventario - módulo de productos y servicios
-            if (id.includes('Inventario') || id.includes('Productos') || 
-                id.includes('EditorProductos') || id.includes('ServiciosListado') || 
-                id.includes('EditorServicios') || id.includes('CategoriasListado') || 
-                id.includes('Tienda')) {
-              return 'inventario';
             }
             // Informes - módulo de informes y gráficas
             if (id.includes('Informes') || id.includes('Graficas') || 

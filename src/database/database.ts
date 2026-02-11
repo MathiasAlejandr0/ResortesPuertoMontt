@@ -328,142 +328,106 @@ export class DatabaseService {
    * 4. Si es legacy, migra datos usando ATTACH DATABASE y sqlcipher_export
    * 5. Reemplazo atómico: backup legacy + renombrado seguro
    */
+  /** Versión de "instalación limpia": si no existe el marcador y hay datos viejos, se archivan y se empieza desde cero. */
+  private static readonly CLEAN_INSTALL_VERSION = 2;
+  private static readonly CLEAN_INSTALL_MARKER = '.instalacion_limpia_v2';
+
   private async initializeDatabaseAsync(): Promise<void> {
     try {
-      // 1. Obtener o generar clave de encriptación
+      const userDataPath = app.getPath('userData');
+      const dataDir = path.join(userDataPath, 'data');
+      const keysDir = path.join(userDataPath, 'keys');
+      const markerPath = path.join(dataDir, DatabaseService.CLEAN_INSTALL_MARKER);
+
+      // 1. Instalación limpia: primera vez que corre esta versión → archivar datos anteriores y empezar desde cero
+      if (!fs.existsSync(markerPath)) {
+        const hasOldData = fs.existsSync(path.join(dataDir, 'resortes.db')) || fs.existsSync(path.join(keysDir, 'db.key'));
+        if (hasOldData) {
+          const backupRoot = path.join(userDataPath, 'backup_antes_instalacion_limpia_' + Date.now());
+          fs.mkdirSync(backupRoot, { recursive: true });
+          try {
+            if (fs.existsSync(dataDir)) {
+              const backupData = path.join(backupRoot, 'data');
+              fs.mkdirSync(backupData, { recursive: true });
+              const entries = fs.readdirSync(dataDir, { withFileTypes: true });
+              for (const e of entries) {
+                const src = path.join(dataDir, e.name);
+                const dest = path.join(backupData, e.name);
+                if (e.isDirectory()) {
+                  if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+                  for (const f of fs.readdirSync(src)) {
+                    fs.renameSync(path.join(src, f), path.join(dest, f));
+                  }
+                  fs.rmdirSync(src);
+                } else {
+                  fs.renameSync(src, dest);
+                }
+              }
+            }
+            if (fs.existsSync(keysDir)) {
+              const backupKeys = path.join(backupRoot, 'keys');
+              fs.mkdirSync(backupKeys, { recursive: true });
+              for (const f of fs.readdirSync(keysDir)) {
+                fs.renameSync(path.join(keysDir, f), path.join(backupKeys, f));
+              }
+              fs.rmdirSync(keysDir);
+            }
+            console.log('✅ Instalación limpia: datos anteriores archivados en', path.basename(backupRoot));
+          } catch (e) {
+            console.warn('⚠️ No se pudo archivar datos anteriores:', e);
+          }
+        }
+        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(markerPath, String(DatabaseService.CLEAN_INSTALL_VERSION), 'utf8');
+      }
+
+      // 2. Obtener o generar clave de encriptación (nueva si se archivaron los keys)
       this.encryptionKey = await this.encryptionKeyService.getOrCreateEncryptionKey();
-      
       if (!this.encryptionKeyService.validateKey(this.encryptionKey)) {
         throw new Error('Clave de encriptación inválida. Debe tener 32 bytes (256 bits)');
       }
 
       const paths = this.getPaths();
       const keyHex = this.encryptionKey.toString('hex');
-      
-      // Crear directorio de datos si no existe
       if (!fs.existsSync(paths.dataDir)) {
         fs.mkdirSync(paths.dataDir, { recursive: true });
       }
 
-      // 2. Verificar si existe base de datos legacy (sin encriptar)
-      const dbExists = fs.existsSync(paths.dbPath);
-      let needsMigration = false;
-      let legacyDb: sqlcipher.Database | null = null;
-
-      if (!dbExists) {
-        console.log('📋 No existe base de datos. Se creará una nueva base de datos encriptada...');
-      } else {
-        console.log('📋 Detectada base de datos existente. Verificando si requiere migración...');
-        
-        // Intentar abrir con clave de encriptación
+      // 3. Solo BD encriptada: si existe archivo, probar clave; si falla, respaldar y crear nueva
+      let dbExists = fs.existsSync(paths.dbPath);
+      if (dbExists) {
         const testDb = new sqlcipher.Database(paths.dbPath);
-        const canOpenWithKey = await new Promise<boolean>((resolve) => {
+        const keyOk = await new Promise<boolean>((resolve) => {
           testDb.serialize(() => {
             testDb.run(`PRAGMA key = "x'${keyHex}'"`, (err: Error | null) => {
               if (err) {
-                // No se puede abrir con clave, probablemente es legacy
                 testDb.close();
                 resolve(false);
                 return;
               }
-              
-              // Verificar que realmente está encriptada y la clave es correcta
-              // Intentar leer de sqlite_master para confirmar que la clave es válida
-              testDb.get('SELECT name FROM sqlite_master WHERE type="table" LIMIT 1', (err2: Error | null, row: any) => {
+              testDb.get('SELECT 1', (err2: Error | null) => {
                 testDb.close();
-                // Si no hay error y podemos leer, la clave es correcta
-                // Si hay error SQLITE_NOTADB, la clave no coincide
-                if (err2 && (err2 as any).code === 'SQLITE_NOTADB') {
-                  console.error('❌ La clave de encriptación no coincide con la base de datos existente');
-                  console.error('⚠️ Esto puede ocurrir si la clave fue regenerada pero la BD usa una clave anterior');
-                  resolve(false);
-                } else {
-                  resolve(!err2);
-                }
+                resolve(!err2);
               });
             });
           });
         });
-
-        if (!canOpenWithKey) {
-          // Intentar abrir como legacy (sin encriptar)
-          console.log('🔄 Intentando abrir como base de datos legacy (sin encriptar)...');
-          legacyDb = new sqlcipher.Database(paths.dbPath);
-          const canOpenLegacy = await new Promise<boolean>((resolve) => {
-            legacyDb!.serialize(() => {
-              // Intentar leer sin clave (modo estándar SQLite)
-              legacyDb!.get('SELECT name FROM sqlite_master WHERE type="table" LIMIT 1', (err: Error | null) => {
-                if (!err) {
-                  // Es legacy, mantener la conexión abierta para la migración
-                  resolve(true);
-                } else {
-                  // No es legacy, probablemente la clave no coincide
-                  legacyDb!.close();
-                  legacyDb = null;
-                  console.error('❌ No se pudo abrir la base de datos con la clave actual ni como legacy');
-                  console.error('⚠️ La base de datos puede estar encriptada con una clave diferente');
-                  console.error('💡 Solución: Si tienes un backup, restáuralo. Si no, la base de datos debe ser recreada.');
-                  resolve(false);
-                }
-              });
-            });
-          });
-
-          if (canOpenLegacy && legacyDb) {
-            console.log('✅ Base de datos legacy detectada (sin encriptar). Iniciando migración...');
-            needsMigration = true;
-          } else {
-            if (legacyDb) {
-              legacyDb.close();
-              legacyDb = null;
-            }
-            // La base de datos existe pero no se puede abrir (clave incorrecta o corrupta)
-            // Eliminarla y crear una nueva
-            console.log('⚠️ La base de datos existe pero no se puede abrir (clave incorrecta o corrupta)');
-            console.log('🗑️  Eliminando base de datos problemática y creando una nueva...');
-            try {
-              const backupPath = paths.dbPath + '.corrupted-' + Date.now();
-              fs.renameSync(paths.dbPath, backupPath);
-              console.log(`✅ Base de datos problemática respaldada en: ${path.basename(backupPath)}`);
-              console.log('📋 Se creará una nueva base de datos encriptada...');
-            } catch (error) {
-              console.warn('⚠️ No se pudo respaldar la base de datos, eliminándola directamente...');
-              try {
-                fs.unlinkSync(paths.dbPath);
-                console.log('✅ Base de datos problemática eliminada');
-              } catch (unlinkError) {
-                console.error('❌ Error eliminando base de datos:', unlinkError);
-                throw new Error('No se pudo eliminar la base de datos problemática. Por favor, elimínala manualmente.');
-              }
-            }
-            // Continuar con la creación de una nueva base de datos
-          }
-        } else {
-          console.log('✅ Base de datos ya está encriptada y la clave coincide. Continuando con inicio normal...');
+        if (!keyOk) {
+          await this.recoverFromKeyMismatch(paths);
+          dbExists = false;
         }
       }
 
-      // 3. Migración de datos (si es necesario)
-      if (needsMigration && legacyDb) {
-        // Nota: migrateLegacyDatabase no usa realmente la conexión legacyDb,
-        // usa ATTACH DATABASE para adjuntar el archivo directamente
-        // Pero mantenemos la conexión abierta hasta que la migración esté completa
-        await this.migrateLegacyDatabase(legacyDb, paths, keyHex);
-        // Cerrar la conexión legacy después de la migración
-        if (legacyDb) {
-          try {
-            legacyDb.close();
-          } catch (closeErr) {
-            console.warn('⚠️ Error cerrando conexión legacy (no crítico):', closeErr);
-          }
-          legacyDb = null;
-        }
+      if (!dbExists) {
+        console.log('📋 Base de datos nueva (instalación limpia o respaldo por clave).');
+      } else {
+        console.log('📋 Base de datos existente y clave correcta.');
       }
 
       // 4. Crear/conectar a base de datos encriptada
       this.db = new sqlcipher.Database(paths.dbPath);
       
-      return new Promise((resolve, reject) => {
+      return new Promise<void>((resolve, reject) => {
         if (!this.db) {
           reject(new Error('Base de datos no inicializada'));
           return;
@@ -484,9 +448,13 @@ export class DatabaseService {
               // Primero verificar versión de cipher - esto confirma que la clave es correcta
               this.db!.get('PRAGMA cipher_version', (err: Error | null, row: any) => {
                 if (err) {
+                  const code = (err as any).code;
+                  if (code === 'SQLITE_NOTADB') {
+                    reject(new Error('KEY_MISMATCH'));
+                    return;
+                  }
                   console.error('❌ Error verificando versión de cipher:', err);
-                  console.error('⚠️ Esto puede indicar que la clave de encriptación no coincide con la BD');
-                  reject(new Error(`Error verificando encriptación: ${err.message}. La base de datos puede estar corrupta o usar una clave diferente. Si tienes un backup, restáuralo desde la configuración.`));
+                  reject(new Error(`Error verificando encriptación: ${err.message}`));
                   return;
                 }
 
@@ -495,27 +463,26 @@ export class DatabaseService {
                 // Hacer una consulta simple para verificar que la BD está accesible
                 this.db!.get('SELECT 1 as test', (err2: Error | null, row2: any) => {
                   if (err2) {
-                    console.error('❌ Error verificando acceso a base de datos:', err2);
                     const errorCode = (err2 as any).code;
                     if (errorCode === 'SQLITE_NOTADB') {
-                      reject(new Error(`La clave de encriptación no coincide con la base de datos. Esto puede ocurrir si la clave fue regenerada. Si tienes un backup, restáuralo. Si no, necesitarás recrear la base de datos.`));
-                    } else {
-                      reject(new Error(`Error accediendo a base de datos: ${err2.message}`));
+                      reject(new Error('KEY_MISMATCH'));
+                      return;
                     }
+                    console.error('❌ Error verificando acceso a base de datos:', err2);
+                    reject(new Error(`Error accediendo a base de datos: ${err2.message}`));
                     return;
                   }
 
                   // Hacer una consulta adicional para asegurar que la BD está completamente lista
                   this.db!.get('SELECT name FROM sqlite_master WHERE type="table" LIMIT 1', (err3: Error | null, row3: any) => {
                     if (err3) {
-                      console.error('❌ Error accediendo a sqlite_master:', err3);
                       const errorCode = (err3 as any).code;
                       if (errorCode === 'SQLITE_NOTADB') {
-                        reject(new Error(`La clave de encriptación no coincide con la base de datos. Esto puede ocurrir si la clave fue regenerada. Si tienes un backup, restáuralo. Si no, necesitarás recrear la base de datos.`));
-                      } else {
-                        console.error('⚠️ La base de datos puede estar corrupta');
-                        reject(new Error(`Error accediendo a estructura de BD: ${err3.message}`));
+                        reject(new Error('KEY_MISMATCH'));
+                        return;
                       }
+                      console.error('❌ Error accediendo a sqlite_master:', err3);
+                      reject(new Error(`Error accediendo a estructura de BD: ${err3.message}`));
                       return;
                     }
 
@@ -597,11 +564,64 @@ export class DatabaseService {
             reject(error);
           }
         });
+      }).catch(async (e: Error) => {
+        if (e.message === 'KEY_MISMATCH') {
+          console.log('🔄 Clave no coincide con la BD: respaldando y creando base de datos nueva...');
+          await this.recoverFromKeyMismatch(paths);
+          return this.initializeDatabaseAsync();
+        }
+        throw e;
       });
     } catch (error) {
       console.error('❌ Error inicializando base de datos encriptada:', error);
       throw error;
     }
+  }
+
+  /**
+   * Cuando la clave no coincide con la BD existente: respalda el archivo y deja listo para crear una nueva.
+   * Así la app puede abrir sin bloquear al usuario.
+   */
+  private async recoverFromKeyMismatch(paths: { dataDir: string; dbPath: string; backupDir: string }): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (this.db) {
+        try {
+          this.db.close((err: Error | null) => {
+            if (err) console.warn('⚠️ Error cerrando BD en recuperación:', err);
+            this.db = null;
+            try {
+              if (fs.existsSync(paths.dbPath)) {
+                const backup = paths.dbPath + '.key_mismatch-' + Date.now();
+                fs.renameSync(paths.dbPath, backup);
+                console.log('✅ BD con clave distinta respaldada en:', path.basename(backup));
+              }
+            } catch (e) {
+              reject(e);
+              return;
+            }
+            resolve();
+          });
+        } catch (e) {
+          this.db = null;
+          try {
+            if (fs.existsSync(paths.dbPath)) {
+              fs.renameSync(paths.dbPath, paths.dbPath + '.key_mismatch-' + Date.now());
+            }
+          } catch (_) {}
+          resolve();
+        }
+      } else {
+        try {
+          if (fs.existsSync(paths.dbPath)) {
+            fs.renameSync(paths.dbPath, paths.dbPath + '.key_mismatch-' + Date.now());
+          }
+        } catch (e) {
+          reject(e);
+          return;
+        }
+        resolve();
+      }
+    });
   }
 
   /**
@@ -638,8 +658,26 @@ export class DatabaseService {
           const legacyPathAbsolute = path.resolve(paths.dbPath);
           encryptedDb.run(`ATTACH DATABASE '${legacyPathAbsolute}' AS legacy`, (err: Error | null) => {
             if (err) {
+              const isNotADb = (err as any).code === 'SQLITE_NOTADB' || /not a database|notadb/i.test(err.message);
               encryptedDb.close();
-              reject(new Error(`Error adjuntando base de datos legacy: ${err.message}`));
+              if (fs.existsSync(tempEncryptedPath)) {
+                try { fs.unlinkSync(tempEncryptedPath); } catch (_) {}
+              }
+              if (isNotADb) {
+                // Archivo no es una BD válida (vacío, corrupto o de otro programa): respaldar y dejar que se cree una nueva
+                const backupInvalid = paths.dbPath + '.invalida-' + Date.now();
+                try {
+                  if (fs.existsSync(paths.dbPath)) {
+                    fs.renameSync(paths.dbPath, backupInvalid);
+                    console.log('Archivo no válido respaldado en:', path.basename(backupInvalid));
+                  }
+                } catch (renameErr) {
+                  console.warn('No se pudo respaldar archivo inválido:', renameErr);
+                }
+                reject(new Error('LEGACY_FILE_NOT_VALID'));
+              } else {
+                reject(new Error(`Error adjuntando base de datos legacy: ${err.message}`));
+              }
               return;
             }
 
@@ -4876,7 +4914,9 @@ export class DatabaseService {
         if (err) {
           console.error('Error cerrando base de datos:', err);
         } else {
-          console.log('✅ Base de datos cerrada correctamente');
+          if (typeof process === 'undefined' || process.env.JEST_WORKER_ID === undefined) {
+            console.log('✅ Base de datos cerrada correctamente');
+          }
         }
       });
       this.db = null;

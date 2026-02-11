@@ -34,23 +34,14 @@ InstallDir "${INSTALL_DIR}"
 !macroend
 
 !macro customInstall
-  ; Crear directorio de datos si no existe
-  CreateDirectory "$APPDATA\ResortesPuertoMontt"
-  CreateDirectory "$APPDATA\ResortesPuertoMontt\data"
-  CreateDirectory "$APPDATA\ResortesPuertoMontt\backups"
-  
-  ; Crear archivo de configuración inicial
-  FileOpen $0 "$APPDATA\ResortesPuertoMontt\config.json" w
-  FileWrite $0 '{"version":"1.1.0","firstRun":true,"backupEnabled":true}'
-  FileClose $0
-  
+  ; No crear carpetas en AppData aquí: la aplicación las crea al abrirse
+  ; con el usuario actual, así se evitan problemas de permisos (instalador como admin).
   ; Crear acceso directo en el escritorio
-  CreateShortCut "$DESKTOP\Resortes Puerto Montt.lnk" "$INSTDIR\Resortes Puerto Montt.exe" "" "$INSTDIR\assets\icon.ico"
-  
+  CreateShortCut "$DESKTOP\Resortes Puerto Montt.lnk" "$INSTDIR\Resortes Puerto Montt.exe" "" ""
   ; Crear entrada en el menú de inicio
   CreateDirectory "$SMPROGRAMS\Resortes Puerto Montt"
-  CreateShortCut "$SMPROGRAMS\Resortes Puerto Montt\Resortes Puerto Montt.lnk" "$INSTDIR\Resortes Puerto Montt.exe" "" "$INSTDIR\assets\icon.ico"
-  CreateShortCut "$SMPROGRAMS\Resortes Puerto Montt\Desinstalar.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\assets\icon.ico"
+  CreateShortCut "$SMPROGRAMS\Resortes Puerto Montt\Resortes Puerto Montt.lnk" "$INSTDIR\Resortes Puerto Montt.exe" "" ""
+  CreateShortCut "$SMPROGRAMS\Resortes Puerto Montt\Desinstalar.lnk" "$INSTDIR\Uninstall.exe" "" ""
 !macroend
 
 ; Nota: macro customUnInstall ya definida arriba para mostrar la página de opciones

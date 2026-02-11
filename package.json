@@ -1,6 +1,6 @@
 {
   "name": "resortes-puerto-montt",
-  "version": "1.1.2",
+  "version": "0.1.0",
   "description": "Sistema de gestión para taller mecánico Resortes Puerto Montt",
   "main": "dist/main/main.js",
   "author": "Mathias Jara <mathias.jara@hotmail.com>",
@@ -13,6 +13,7 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "dist": "npm run build && electron-builder",
+    "dist:installer": "powershell -ExecutionPolicy Bypass -File ./scripts/build-nsis.ps1",
     "pack": "electron-builder --dir",
     "postinstall": "electron-builder install-app-deps",
     "test": "jest",
@@ -132,17 +133,15 @@
     "win": {
       "target": [
         {
-          "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
           "target": "portable",
           "arch": ["x64"]
         }
       ],
       "icon": "assets/icon.png",
-      "publisherName": "Resortes Puerto Montt",
-      "artifactName": "${productName}-${version}-Setup.${ext}"
+      "artifactName": "${productName}-Setup.${ext}",
+      "signtoolOptions": {
+        "publisherName": "Resortes Puerto Montt"
+      }
     },
     "nsis": {
       "oneClick": false,

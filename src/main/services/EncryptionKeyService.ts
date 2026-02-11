@@ -134,8 +134,9 @@ export class EncryptionKeyService {
       return newKey;
 
     } catch (error) {
+      const cause = error instanceof Error ? error.message : String(error);
       this.logger.error('[EncryptionKeyService] Error obteniendo clave de encriptación:', error);
-      throw new Error('No se pudo obtener la clave de encriptación. El sistema no puede iniciar de forma segura.');
+      throw new Error('No se pudo obtener la clave de encriptación. El sistema no puede iniciar de forma segura. Detalle: ' + cause);
     }
   }
 
@@ -190,16 +191,18 @@ export class EncryptionKeyService {
         createdAt: new Date().toISOString(),
       };
       
-      // Escribir archivo con permisos restrictivos
-      fs.writeFileSync(this.keyFilePath, JSON.stringify(keyStorage, null, 2), {
-        encoding: 'utf8',
-        mode: 0o600, // Solo lectura/escritura para el usuario
-      });
+      // Escribir archivo (en Windows no usar mode para evitar errores de permisos)
+      const writeOpts: { encoding: BufferEncoding; mode?: number } = { encoding: 'utf8' };
+      if (process.platform !== 'win32') {
+        writeOpts.mode = 0o600;
+      }
+      fs.writeFileSync(this.keyFilePath, JSON.stringify(keyStorage, null, 2), writeOpts);
       
       this.logger.info('[EncryptionKeyService] Clave guardada de forma segura');
     } catch (error) {
+      const cause = error instanceof Error ? error.message : String(error);
       this.logger.error('[EncryptionKeyService] Error guardando clave:', error);
-      throw new Error('No se pudo guardar la clave de encriptación de forma segura');
+      throw new Error('No se pudo guardar la clave de encriptación de forma segura. Ruta: ' + this.keyFilePath + '. Detalle: ' + cause);
     }
   }
 
