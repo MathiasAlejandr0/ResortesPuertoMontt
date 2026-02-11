@@ -13,6 +13,65 @@ export default defineConfig({
   build: {
     outDir: 'dist/renderer',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // Feature chunks - agrupar páginas relacionadas para code-splitting
+          if (id.includes('src/renderer/pages')) {
+            // Taller - módulo de órdenes y trabajo
+            if (id.includes('Ordenes') || id.includes('Cotizaciones') || 
+                id.includes('Agenda') || id.includes('Recordatorios') || 
+                id.includes('Vehiculos') || id.includes('Historico')) {
+              return 'taller';
+            }
+            // Caja - módulo de caja diaria
+            if (id.includes('CajaDiaria') || id.includes('CierresCaja') || 
+                id.includes('MovimientosCaja') || id.includes('Pagos')) {
+              return 'caja';
+            }
+            // Cuentas - módulo de cuentas corrientes
+            if (id.includes('SaldosCuentas') || id.includes('MovimientosCuentas') || 
+                id.includes('InformesCuentaCorriente')) {
+              return 'cuentas';
+            }
+            // Inventario - módulo de productos y servicios
+            if (id.includes('Inventario') || id.includes('Productos') || 
+                id.includes('EditorProductos') || id.includes('ServiciosListado') || 
+                id.includes('EditorServicios') || id.includes('CategoriasListado') || 
+                id.includes('Tienda')) {
+              return 'inventario';
+            }
+            // Informes - módulo de informes y gráficas
+            if (id.includes('Informes') || id.includes('Graficas') || 
+                id.includes('ReporteTecnicos')) {
+              return 'informes';
+            }
+            // Trabajadores - módulo de trabajadores
+            if (id.includes('Trabajadores') || id.includes('PagosTrabajadores') || 
+                id.includes('ScoreTrabajadores')) {
+              return 'trabajadores';
+            }
+            // Configuración - módulo de configuración
+            if (id.includes('Configuracion') || id.includes('Perfil')) {
+              return 'configuracion';
+            }
+            // Importación/Exportación
+            if (id.includes('Importar') || id.includes('Exportar')) {
+              return 'importacion';
+            }
+            // Clientes
+            if (id.includes('Clientes')) {
+              return 'clientes';
+            }
+          }
+          
+          // Dejar que Vite maneje automáticamente los vendor chunks
+          // Esto evita dependencias circulares
+          return null;
+        },
+      },
+    },
+    chunkSizeWarningLimit: 1000, // Aumentar límite a 1MB ya que ahora tenemos chunks optimizados
   },
   server: {
     port: 3000,

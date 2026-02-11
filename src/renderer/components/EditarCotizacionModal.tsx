@@ -78,7 +78,7 @@ export default function EditarCotizacionModal({
         try {
           if (cotizacion.id) {
             const detallesReales = await window.electronAPI.getDetallesCotizacion(cotizacion.id);
-            setDetalles(detallesReales);
+            setDetalles(Array.isArray(detallesReales) ? detallesReales : []);
           }
         } catch (error) {
           console.error('Error al cargar detalles de cotización:', error);
@@ -124,8 +124,10 @@ export default function EditarCotizacionModal({
     setDetalles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const getDetallesList = () => (Array.isArray(detalles) ? detalles : []);
+
   const calcularTotal = () => {
-    return detalles.reduce((sum, detalle) => sum + detalle.subtotal, 0);
+    return getDetallesList().reduce((sum, detalle) => sum + detalle.subtotal, 0);
   };
 
   const handleSave = async () => {
@@ -375,7 +377,7 @@ export default function EditarCotizacionModal({
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {detalles.map((detalle, index) => (
+                {getDetallesList().map((detalle, index) => (
                   <div key={index} className="p-4 border border-gray-200 rounded-lg">
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                       <div>
@@ -437,8 +439,8 @@ export default function EditarCotizacionModal({
                         <input
                           type="number"
                           min="1"
-                          value={detalle.cantidad}
-                          onChange={(e) => updateDetalle(index, 'cantidad', parseInt(e.target.value) || 1)}
+                          value={detalle.cantidad === 0 ? '' : detalle.cantidad}
+                          onChange={(e) => updateDetalle(index, 'cantidad', e.target.value === '' ? 0 : parseInt(e.target.value))}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                           placeholder="Cantidad"
                         />
@@ -450,8 +452,8 @@ export default function EditarCotizacionModal({
                         <input
                           type="number"
                           min="0"
-                          value={detalle.precio}
-                          onChange={(e) => updateDetalle(index, 'precio', parseInt(e.target.value) || 0)}
+                          value={detalle.precio === 0 ? '' : detalle.precio}
+                          onChange={(e) => updateDetalle(index, 'precio', e.target.value === '' ? 0 : parseInt(e.target.value))}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                           placeholder="Precio"
                         />
@@ -496,8 +498,8 @@ export default function EditarCotizacionModal({
                   <input
                     type="number"
                     min="0"
-                    value={formData.total}
-                    onChange={(e) => handleInputChange('total', parseInt(e.target.value) || 0)}
+                    value={formData.total === 0 ? '' : formData.total}
+                    onChange={(e) => handleInputChange('total', e.target.value === '' ? 0 : parseInt(e.target.value))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="Total final decidido por el taller"
                   />

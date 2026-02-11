@@ -319,8 +319,8 @@ function VehiculoForm({ vehiculo, clienteId, onSave, onCancel }: VehiculoFormPro
             <label className="block text-sm font-medium text-gray-300 mb-2">Año</label>
             <input
               type="number"
-              value={formData.año}
-              onChange={(e) => handleInputChange('año', parseInt(e.target.value))}
+              value={formData.año === 0 ? '' : formData.año}
+              onChange={(e) => handleInputChange('año', e.target.value === '' ? 0 : parseInt(e.target.value))}
               className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-red-500 focus:outline-none"
               min="1900"
               max={new Date().getFullYear() + 1}

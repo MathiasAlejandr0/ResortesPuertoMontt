@@ -131,6 +131,18 @@ export default function OrdenesPage() {
     };
   }, []);
 
+  // Listener para abrir venta rápida desde acciones rápidas
+  useEffect(() => {
+    const handleNuevaVentaEvent = () => {
+      setIsVentaFormOpen(true);
+    };
+
+    window.addEventListener('app:nueva-venta', handleNuevaVentaEvent);
+    return () => {
+      window.removeEventListener('app:nueva-venta', handleNuevaVentaEvent);
+    };
+  }, []);
+
   // Funciones CRUD para órdenes de trabajo
   const handleViewOrden = (orden: OrdenTrabajo) => {
     setOrdenSeleccionada(orden);

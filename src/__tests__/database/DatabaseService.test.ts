@@ -3,20 +3,25 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Mock de electron.app antes de importar DatabaseService
+const testDataDir = path.join(__dirname, '../../../../test-data/database-service');
+
 jest.mock('electron', () => ({
   app: {
-    getPath: jest.fn(() => path.join(__dirname, '../../../../test-data'))
+    getPath: jest.fn(() => testDataDir)
   }
 }));
 
 // Helper: generar RUT único para evitar colisiones entre tests
 let __rutCounter = 0;
+let __patenteCounter = 0;
 const genRut = () => {
   const baseRaw = (Date.now() * 100 + (__rutCounter++ % 100)) % 100000000; // 8 dígitos con contador
   const base = Math.floor(baseRaw);
   const dv = base % 10; // simplificado para tests
   return `${String(base).padStart(8, '0')}-${dv}`;
 };
+
+const genPatente = () => `PAT-${Date.now()}-${__patenteCounter++}`;
 
 // Establecer NODE_ENV en development para usar rutas de desarrollo
 const originalEnv = process.env.NODE_ENV;
@@ -25,14 +30,14 @@ process.env.NODE_ENV = 'development';
 describe('DatabaseService', () => {
   let dbService: DatabaseService;
   let testDbPath: string;
-  const testDataDir = path.join(__dirname, '../../../../test-data');
+  const testDataDir = path.join(__dirname, '../../../../test-data/database-service');
 
   beforeAll(() => {
     // Crear directorio de prueba
     if (!fs.existsSync(testDataDir)) {
       fs.mkdirSync(testDataDir, { recursive: true });
     }
-    testDbPath = path.join(testDataDir, 'resortes.db');
+    testDbPath = path.join(testDataDir, 'data', 'resortes.db');
     
     // Eliminar base de datos de prueba si existe
     if (fs.existsSync(testDbPath)) {
@@ -158,7 +163,7 @@ describe('DatabaseService', () => {
       });
     }, 10000); // Timeout de 10 segundos para el test completo
 
-    it('debería usar modo WAL para mejor rendimiento', async () => {
+    it('debería usar modo DELETE para compatibilidad con SQLCipher', async () => {
       const db = (dbService as any).db;
       
       return new Promise<void>((resolve, reject) => {
@@ -167,8 +172,8 @@ describe('DatabaseService', () => {
             reject(err);
             return;
           }
-          // WAL mode mejora el rendimiento de lecturas concurrentes
-          expect(row?.journal_mode).toBe('wal');
+          // SQLCipher usa DELETE para evitar errores de integridad
+          expect(row?.journal_mode).toBe('delete');
           resolve();
         });
       });
@@ -222,7 +227,7 @@ describe('DatabaseService', () => {
         marca: 'Toyota',
         modelo: 'Corolla',
         año: 2020,
-        patente: `TESTFK${Date.now()}`,
+        patente: genPatente(),
         activo: true
       };
 
@@ -282,7 +287,7 @@ describe('DatabaseService', () => {
         marca: 'Toyota',
         modelo: 'Corolla',
         año: 2020,
-        patente: `CASCADE${ultimoId + 1}`,
+        patente: genPatente(),
         activo: true
       };
       const vehiculoGuardado = await dbService.saveVehiculo(vehiculo);
@@ -342,7 +347,7 @@ describe('DatabaseService', () => {
         marca: 'Toyota',
         modelo: 'Corolla',
         año: 2020,
-        patente: 'UNIQUE01',
+        patente: genPatente(),
         activo: true
       };
       
@@ -353,7 +358,7 @@ describe('DatabaseService', () => {
         marca: 'Honda',
         modelo: 'Civic',
         año: 2021,
-        patente: 'UNIQUE01', // Misma patente
+        patente: vehiculo1.patente, // Misma patente
         activo: true
       };
       
@@ -379,7 +384,7 @@ describe('DatabaseService', () => {
         marca: 'Toyota',
         modelo: 'Corolla',
         año: 2020,
-        patente: 'TEST02',
+        patente: genPatente(),
         activo: true
       };
       const vehiculoGuardado = await dbService.saveVehiculo(vehiculo);
@@ -469,7 +474,7 @@ describe('DatabaseService', () => {
         marca: 'Toyota',
         modelo: 'Corolla',
         año: 1800, // Año fuera de rango (debe estar entre 1900 y 2030)
-        patente: 'TEST03',
+        patente: genPatente(),
         activo: true
       };
       
@@ -554,7 +559,7 @@ describe('DatabaseService', () => {
         marca: 'Toyota',
         modelo: 'Corolla',
         año: 2020,
-        patente: 'VEH001',
+        patente: genPatente(),
         color: 'Blanco',
         kilometraje: 50000,
         observaciones: 'Buen estado',
@@ -646,7 +651,7 @@ describe('DatabaseService', () => {
         marca: 'Toyota',
         modelo: 'Corolla',
         año: 2020,
-        patente: 'TRANS01',
+        patente: genPatente(),
         activo: true
       };
       const vehiculoGuardado = await dbService.saveVehiculo(vehiculo);

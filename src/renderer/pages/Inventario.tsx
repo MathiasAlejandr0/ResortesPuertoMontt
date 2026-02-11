@@ -6,6 +6,7 @@ import EditarRepuestoModal from '../components/EditarRepuestoModal';
 import OCRModal from '../components/OCRModal';
 import InvoiceReviewModal from '../components/InvoiceReviewModal';
 import StockModal from '../components/StockModal';
+import { ActionDialog } from '../components/ActionDialog';
 import { useApp } from '../contexts/AppContext';
 import { notify, Logger, confirmAction } from '../utils/cn';
 import { 
@@ -36,6 +37,11 @@ export default function InventarioPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<Repuesto[] | null>(null);
   const [pageSize, setPageSize] = useState(100);
+  const [nullItems, setNullItems] = useState<Array<{ repuesto: Repuesto; campos: string[] }>>([]);
+  const [selectedNullIds, setSelectedNullIds] = useState<Set<number>>(new Set());
+  const [isNullsModalOpen, setIsNullsModalOpen] = useState(false);
+  const [lowStockCount, setLowStockCount] = useState(0);
+  const LOW_STOCK_THRESHOLD = 5;
   
   // Usar repuestos directamente del contexto
   const repuestos = initialRepuestos;
@@ -94,6 +100,10 @@ export default function InventarioPage() {
 
     // Filtrar por estado
     if (filterEstado !== 'todos') {
+      if (filterEstado === 'nulos') {
+        filtered = filtered.filter(repuesto => getCamposNulos(repuesto).length > 0);
+        return filtered;
+      }
       filtered = filtered.filter(repuesto => {
         const stock = repuesto.stock || 0;
         // Usar stockMinimo personalizado o 5 por defecto
@@ -126,6 +136,45 @@ export default function InventarioPage() {
     // Sin búsqueda ni filtros: mostrar solo 5 para UI limpia
     return filteredRepuestos.slice(0, 5);
   }, [filteredRepuestos, deferredSearchTerm, filterCategoria, filterEstado, pageSize]);
+
+  const getCamposNulos = useCallback((repuesto: Repuesto) => {
+    const campos: string[] = [];
+    const isEmpty = (value?: string) => !value || !value.trim();
+    if (isEmpty(repuesto.codigo)) campos.push('SKU');
+    if (isEmpty(repuesto.nombre)) campos.push('Nombre');
+    if (isEmpty(repuesto.descripcion)) campos.push('Descripción');
+    if (isEmpty(repuesto.categoria)) campos.push('Categoría');
+    if (isEmpty(repuesto.marca)) campos.push('Marca');
+    if (isEmpty(repuesto.ubicacion)) campos.push('Ubicación');
+    return campos;
+  }, []);
+
+  const analizarInventario = useCallback((lista: Repuesto[], showNotifications = false) => {
+    const nulos = lista
+      .map((repuesto) => ({ repuesto, campos: getCamposNulos(repuesto) }))
+      .filter((item) => item.campos.length > 0);
+    const lowStock = lista.filter((r) => (r.stock ?? 0) <= LOW_STOCK_THRESHOLD).length;
+
+    setNullItems(nulos);
+    setLowStockCount(lowStock);
+    setSelectedNullIds((prev) => {
+      if (prev.size === 0) return new Set(nulos.map((item) => item.repuesto.id!).filter(Boolean));
+      return prev;
+    });
+
+    if (showNotifications) {
+      if (nulos.length > 0) {
+        notify.warning('Se detectaron datos nulos', `${nulos.length} items con campos vacíos.`);
+      }
+      if (lowStock > 0) {
+        notify.warning('Stock bajo', `${lowStock} items con stock de ${LOW_STOCK_THRESHOLD} o menos.`);
+      }
+    }
+  }, [getCamposNulos]);
+
+  useEffect(() => {
+    analizarInventario(repuestos);
+  }, [repuestos, analizarInventario]);
 
   const loadMore = useCallback(() => {
     setPageSize((s) => s + 100);
@@ -482,10 +531,8 @@ export default function InventarioPage() {
         activo: true
       }));
 
-      // Guardar repuestos en la base de datos
-      for (const repuesto of repuestosParaGuardar) {
-        await window.electronAPI.saveRepuesto(repuesto);
-      }
+      // Guardar repuestos en la base de datos de forma atómica
+      await window.electronAPI.saveRepuestosBatch(repuestosParaGuardar);
 
       notify.success('Éxito', `Se importaron ${repuestosParaGuardar.length} repuestos desde la factura`);
       
@@ -498,6 +545,48 @@ export default function InventarioPage() {
     } catch (error) {
       console.error('Error guardando repuestos:', error);
       notify.error('Error', 'Error al guardar los repuestos. Por favor, inténtalo de nuevo.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const openNullsModal = () => {
+    setSelectedNullIds(new Set(nullItems.map((item) => item.repuesto.id!).filter(Boolean)));
+    setIsNullsModalOpen(true);
+  };
+
+  const toggleNullSelection = (id: number) => {
+    setSelectedNullIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllNulls = () => {
+    setSelectedNullIds(new Set(nullItems.map((item) => item.repuesto.id!).filter(Boolean)));
+  };
+
+  const clearNullSelection = () => {
+    setSelectedNullIds(new Set());
+  };
+
+  const handleDeleteNulls = async (ids: number[]) => {
+    if (!ids.length) return;
+    const confirmed = await confirmAction('¿Eliminar repuestos con datos nulos?', `Se eliminarán ${ids.length} items.`);
+    if (!confirmed) return;
+    setIsLoading(true);
+    try {
+      const resp = await window.electronAPI.deleteRepuestosBatch(ids);
+      if (!resp?.success) {
+        throw new Error(resp?.error || 'No se pudieron eliminar los repuestos');
+      }
+      await refreshRepuestos();
+      notify.success('Eliminación completada', `${resp.deleted || 0} items eliminados.`);
+      setIsNullsModalOpen(false);
+    } catch (error) {
+      notify.error('Error', error instanceof Error ? error.message : 'Error eliminando repuestos');
     } finally {
       setIsLoading(false);
     }
@@ -659,6 +748,8 @@ export default function InventarioPage() {
       if (result?.success) {
         // Refrescar la lista de repuestos ANTES de mostrar el mensaje
         await refreshRepuestos();
+        const allRepuestos = await window.electronAPI.getAllRepuestos();
+        analizarInventario(allRepuestos, true);
         
         // Mostrar notificación de éxito
         notify.success(
@@ -707,6 +798,31 @@ export default function InventarioPage() {
           Nuevo Item
         </button>
       </div>
+
+      {(nullItems.length > 0 || lowStockCount > 0) && (
+        <Card className="border border-yellow-200 bg-yellow-50">
+          <CardContent className="p-4 flex flex-wrap items-center gap-4 justify-between">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-yellow-600" />
+              <div className="text-sm text-yellow-900">
+                Se detectaron alertas en el inventario.
+              </div>
+            </div>
+            <div className="flex items-center gap-3 text-sm">
+              <Badge variant="secondary">Nulos: {nullItems.length}</Badge>
+              <Badge variant="secondary">Stock ≤ {LOW_STOCK_THRESHOLD}: {lowStockCount}</Badge>
+              {nullItems.length > 0 && (
+                <button
+                  onClick={openNullsModal}
+                  className="px-3 py-1 rounded-md border border-yellow-400 text-yellow-900 hover:bg-yellow-100 transition-colors"
+                >
+                  Revisar nulos
+                </button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* KPI Cards */}
       <div className="grid gap-6 md:grid-cols-4">
@@ -807,6 +923,7 @@ export default function InventarioPage() {
             className="px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
           >
             <option value="todos">Todos los estados</option>
+            <option value="nulos">Con nulos</option>
             <option value="critico">Crítico</option>
             <option value="bajo">Bajo</option>
             <option value="normal">Normal</option>
@@ -864,6 +981,91 @@ export default function InventarioPage() {
           </div>
         )}
       </div>
+
+      <ActionDialog
+        open={isNullsModalOpen}
+        onOpenChange={setIsNullsModalOpen}
+        title="Repuestos con datos nulos"
+        description="Selecciona los items que deseas eliminar."
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              {nullItems.length} items con campos vacíos
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={selectAllNulls}
+                className="px-3 py-1 rounded-md border border-border text-sm hover:bg-muted"
+              >
+                Seleccionar todos
+              </button>
+              <button
+                onClick={clearNullSelection}
+                className="px-3 py-1 rounded-md border border-border text-sm hover:bg-muted"
+              >
+                Limpiar selección
+              </button>
+            </div>
+          </div>
+          <div className="max-h-[50vh] overflow-y-auto border border-border rounded-md">
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="px-3 py-2 text-left">Sel</th>
+                  <th className="px-3 py-2 text-left">SKU</th>
+                  <th className="px-3 py-2 text-left">Nombre</th>
+                  <th className="px-3 py-2 text-left">Campos nulos</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nullItems.map((item) => (
+                  <tr key={item.repuesto.id} className="border-t border-border">
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedNullIds.has(item.repuesto.id || 0)}
+                        onChange={() => item.repuesto.id && toggleNullSelection(item.repuesto.id)}
+                      />
+                    </td>
+                    <td className="px-3 py-2">{item.repuesto.codigo || '-'}</td>
+                    <td className="px-3 py-2">{item.repuesto.nombre || '-'}</td>
+                    <td className="px-3 py-2">
+                      <span className="text-xs text-red-600">
+                        {item.campos.join(', ')}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {nullItems.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
+                      No hay registros con datos nulos
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => handleDeleteNulls(Array.from(selectedNullIds))}
+              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
+              disabled={selectedNullIds.size === 0 || isLoading}
+            >
+              Eliminar seleccionados
+            </button>
+            <button
+              onClick={() => handleDeleteNulls(nullItems.map((item) => item.repuesto.id!).filter(Boolean))}
+              className="px-4 py-2 border border-red-600 text-red-700 rounded-md hover:bg-red-50 disabled:opacity-50"
+              disabled={nullItems.length === 0 || isLoading}
+            >
+              Eliminar todos
+            </button>
+          </div>
+        </div>
+      </ActionDialog>
 
       {/* Modal Editar Repuesto */}
       <EditarRepuestoModal

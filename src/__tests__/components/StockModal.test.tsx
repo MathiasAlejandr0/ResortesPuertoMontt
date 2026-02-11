@@ -94,7 +94,7 @@ describe('StockModal', () => {
       />
     );
 
-    expect(screen.getByText(/10/i)).toBeInTheDocument(); // Stock actual
+    expect(screen.getAllByText(/10/i).length).toBeGreaterThan(0); // Stock actual
     expect(screen.getByText(/15/i)).toBeInTheDocument(); // Nuevo stock (10 + 5)
   });
 

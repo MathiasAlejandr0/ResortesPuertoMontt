@@ -7,15 +7,17 @@ import * as sqlite3 from 'sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const testDataDir = path.join(__dirname, '../../../test-data/migrations');
+
 jest.mock('electron', () => ({
   app: {
-    getPath: jest.fn(() => path.join(__dirname, '../../../test-data')),
+    getPath: jest.fn(() => testDataDir),
   },
 }));
 
 describe('MigrationService', () => {
   let migrationService: MigrationService;
-  const testDataDir = path.join(__dirname, '../../../test-data');
+  const testDataDir = path.join(__dirname, '../../../test-data/migrations');
   const testDbPath = path.join(testDataDir, 'resortes-migrations.db');
 
   beforeAll(() => {
@@ -45,7 +47,7 @@ describe('MigrationService', () => {
 
   it('debería obtener la versión objetivo', () => {
     const targetVersion = migrationService.getTargetVersion();
-    expect(targetVersion).toBe('1.1.2');
+    expect(targetVersion).toBe('1.2.0');
   });
 
   it('debería obtener migraciones disponibles', () => {

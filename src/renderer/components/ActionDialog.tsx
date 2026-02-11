@@ -19,6 +19,7 @@ interface ActionDialogProps {
   variant?: "modal" | "slide-over"
   size?: "sm" | "md" | "lg" | "xl" | "full"
   className?: string
+  preventAutoClose?: boolean
 }
 
 const sizeClasses = {
@@ -38,10 +39,49 @@ export function ActionDialog({
   variant = "modal",
   size = "lg",
   className,
+  preventAutoClose = false,
 }: ActionDialogProps) {
+  // Wrapper para onOpenChange que previene el cierre automático si preventAutoClose está activo
+  const handleOpenChange = React.useCallback((newOpen: boolean) => {
+    // Si preventAutoClose está activo y se intenta cerrar
+    if (preventAutoClose && !newOpen) {
+      // No permitir cerrar automáticamente
+      // El cierre solo será posible cuando el usuario haga clic explícitamente en X o botón Cancelar
+      // Los handlers onInteractOutside y onEscapeKeyDown previenen el cierre automático
+      return;
+    }
+    onOpenChange(newOpen);
+  }, [preventAutoClose, onOpenChange]);
+
+  // Listener para el evento personalizado de cierre explícito (Dialog)
+  React.useEffect(() => {
+    if (preventAutoClose && variant === "modal") {
+      const handleDialogCloseRequest = () => {
+        onOpenChange(false);
+      };
+      window.addEventListener('dialog-close-request', handleDialogCloseRequest);
+      return () => {
+        window.removeEventListener('dialog-close-request', handleDialogCloseRequest);
+      };
+    }
+  }, [preventAutoClose, variant, onOpenChange]);
+
+  // Listener para el evento personalizado de cierre explícito (Sheet)
+  React.useEffect(() => {
+    if (preventAutoClose && variant === "slide-over") {
+      const handleSheetCloseRequest = () => {
+        onOpenChange(false);
+      };
+      window.addEventListener('sheet-close-request', handleSheetCloseRequest);
+      return () => {
+        window.removeEventListener('sheet-close-request', handleSheetCloseRequest);
+      };
+    }
+  }, [preventAutoClose, variant, onOpenChange]);
+
   if (variant === "slide-over") {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
+      <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent 
           side="right" 
           className={cn(
@@ -50,6 +90,7 @@ export function ActionDialog({
             size === "full" && "sm:max-w-[95vw]",
             className
           )}
+          preventAutoClose={preventAutoClose}
         >
           {(title || description) && (
             <SheetHeader className="mb-6">
@@ -68,13 +109,14 @@ export function ActionDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className={cn(
           sizeClasses[size],
           "max-h-[90vh] overflow-y-auto",
           className
         )}
+        preventAutoClose={preventAutoClose}
       >
         {(title || description) && (
           <DialogHeader>

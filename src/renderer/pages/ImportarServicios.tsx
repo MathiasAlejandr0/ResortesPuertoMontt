@@ -43,7 +43,7 @@ export default function ImportarServiciosPage() {
         <CardContent className="p-6 space-y-6">
           <div className="rounded-md bg-gray-100 text-gray-700 text-sm px-4 py-3">
             Puede descargar un ejemplo haciendo{' '}
-            <button className="text-red-600 hover:underline">click aquí</button>
+            <button className="text-red-600 hover:underline">clic aquí</button>
           </div>
 
           <div className="rounded-md bg-red-50 border border-red-200 text-gray-700 text-sm px-4 py-3 space-y-2">
@@ -55,7 +55,7 @@ export default function ImportarServiciosPage() {
               + Si no desea discriminar el impuesto, en la columna "Impuesto en %" ingrese el numero 0 y en las columnas "precio sin impuesto y precio con impuesto" debe ingresar el mismo valor.
             </div>
             <div>
-              + Impuesto en %: Tener en cuenta que el valor numérico que ingrese en esta columna, tendrá que estar cargado en el listado de impuestos (Menú: "Configuraciones &gt; Formularios &gt; Configura tu impuesto país")
+              + Impuesto en %: Tener en cuenta que el valor numérico que ingrese en esta columna, tendrá que estar cargado en el listado de impuestos (Menú: "Configuraciones &gt; Formularios &gt; Configura tu impuesto principal")
             </div>
             <div>
               + Recargo: es un valor expresado en porcentaje de la ganancia según la columna "costo". El sistema no realiza cálculo automático del precio final, tiene que cargar el precio en la columna correspondiente.
@@ -64,10 +64,10 @@ export default function ImportarServiciosPage() {
               + ID Categoría: Si ya creó categorías en Dirup, puede ver los números de ID en el listado de categorías y asignarlos en esta columna.
             </div>
             <div>
-              + Checklist: Puede establecer el valor "1" para que aparezca en el listado dentro del Checklist de las ordenes o en valor "0" para el caso contrario.
+              + Checklist: Puede establecer el valor "1" para que aparezca en el listado dentro del checklist de las órdenes o en valor "0" para el caso contrario.
             </div>
             <div>
-              + Si la primer fila contiene los nombres de la columna, elimínela. Deje sólo los datos a cargar.
+              + Si la primer fila contiene los nombres de la columna, elimínela. Deje solo los datos a cargar.
             </div>
           </div>
 

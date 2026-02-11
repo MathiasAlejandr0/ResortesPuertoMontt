@@ -1,8 +1,9 @@
-import React, { useState, useEffect, startTransition, useRef } from 'react';
+import React, { useState, useEffect, startTransition, useRef, useMemo } from 'react';
 import { X, User, Mail, Phone, MapPin, Plus, Trash2, ChevronLeft, ChevronRight, Save } from 'lucide-react';
 import { Cliente, Vehiculo } from '../types';
 import { notify, Logger, formatearRUT } from '../utils/cn';
-import { ActionDialog } from './ActionDialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import { useAutoSave } from '../hooks/useAutoSave';
 
 interface ClienteFormProps {
   cliente?: Cliente;
@@ -38,11 +39,35 @@ export default function ClienteForm({
   // Refs para los inputs principales
   const inputNombreRef = useRef<HTMLInputElement>(null);
 
+  // Objeto con todos los datos del formulario para auto-guardar
+  const formDataForSave = useMemo(() => ({
+    formData,
+    step,
+    vehiculos
+  }), [formData, step, vehiculos]);
+
+  // Hook de auto-guardado (solo si no es edición de cliente existente)
+  const { restore, clear } = useAutoSave({
+    key: 'cliente',
+    data: formDataForSave,
+    enabled: isOpen && !cliente, // Solo auto-guardar si es nuevo cliente
+    onRestore: (restored: any) => {
+      if (restored && !cliente) {
+        Logger.log('📂 Restaurando datos del formulario de cliente:', restored);
+        if (restored.formData) setFormData(restored.formData);
+        if (restored.step) setStep(restored.step);
+        if (restored.vehiculos) setVehiculos(restored.vehiculos);
+        notify.success('Datos restaurados', 'Se han restaurado los datos del formulario anterior');
+      }
+    }
+  });
+
   // Resetear formulario cuando se abre
   // Usar useEffect en lugar de useLayoutEffect para evitar bloquear el render inicial
   useEffect(() => {
     if (isOpen) {
-      // Resetear TODOS los estados cuando se abre
+      // El hook de auto-guardado restaurará automáticamente si hay datos guardados (solo para nuevos clientes)
+      // Si es edición de cliente existente o no hay datos guardados, resetear normalmente
       setIsSubmitting(false);
       setStep(1);
       setErrors({});
@@ -50,10 +75,14 @@ export default function ClienteForm({
       if (cliente) {
         setFormData(cliente);
       } else {
-        setFormData({ nombre: '', rut: '', telefono: '', email: '', direccion: '', activo: true });
+        // Solo resetear si no hay datos guardados
+        const restored = restore();
+        if (!restored) {
+          setFormData({ nombre: '', rut: '', telefono: '', email: '', direccion: '', activo: true });
+        }
       }
     }
-  }, [isOpen, cliente]);
+  }, [isOpen, cliente, restore]);
 
   // Enfocar el primer input cuando el modal se abre
   // Usar múltiples requestAnimationFrame para asegurar que el DOM esté completamente listo
@@ -243,6 +272,10 @@ export default function ClienteForm({
         throw new Error(res?.error || 'Error en guardado atómico');
       }
       await onSave(res.cliente);
+      
+      // Limpiar auto-guardado después de guardar exitosamente
+      clear();
+      
       setIsSubmitting(false);
       onClose();
     } catch (error: any) {
@@ -255,17 +288,29 @@ export default function ClienteForm({
   };
 
   return (
-    <ActionDialog
-      open={isOpen}
-      onOpenChange={onClose}
-      variant="slide-over"
-      size="lg"
-      title={title}
-      description={subtitle}
-    >
-      <div className="h-full">
-        {/* Form */}
-        <form className="p-6 space-y-4">
+    <Dialog open={isOpen} onOpenChange={(newOpen) => {
+      // Solo cerrar si el usuario explícitamente quiere cerrar (no por pérdida de foco)
+      if (!newOpen) {
+        const hasData = formData.nombre || formData.rut || vehiculos.length > 0;
+        if (hasData) {
+          // Los datos ya están guardados automáticamente, permitir cerrar
+          onClose();
+        } else {
+          onClose();
+        }
+      }
+    }}>
+      <DialogContent 
+        className="max-w-md bg-white text-gray-900 max-h-[90vh] overflow-y-auto"
+        preventAutoClose={true}
+      >
+        <DialogHeader className="text-left">
+          <DialogTitle className="text-2xl">{title}</DialogTitle>
+          <DialogDescription className="text-base">{subtitle}</DialogDescription>
+        </DialogHeader>
+        <div className="h-full">
+          {/* Form */}
+          <form className="space-y-4">
           {/* Error general */}
           {errors.general && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
@@ -400,7 +445,7 @@ export default function ClienteForm({
                 <div key={idx} className="grid grid-cols-7 gap-2 items-center border rounded-md p-3">
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Marca" value={v.marca} onChange={e => updateVehiculo(idx, 'marca', e.target.value)} />
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Modelo" value={v.modelo} onChange={e => updateVehiculo(idx, 'modelo', e.target.value)} />
-                  <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Año" type="number" value={v.año} onChange={e => updateVehiculo(idx, 'año', Number(e.target.value))} />
+                  <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Año" type="number" value={v.año === 0 ? '' : v.año} onChange={e => updateVehiculo(idx, 'año', e.target.value === '' ? 0 : Number(e.target.value))} />
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Patente" value={v.patente} onChange={e => updateVehiculo(idx, 'patente', e.target.value)} />
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="N° Chasis" value={v.numeroChasis || ''} onChange={e => updateVehiculo(idx, 'numeroChasis', e.target.value)} />
                   <input className="col-span-1 border rounded px-2 py-1 pointer-events-auto" placeholder="Color" value={v.color || ''} onChange={e => updateVehiculo(idx, 'color', e.target.value)} />
@@ -440,6 +485,7 @@ export default function ClienteForm({
           </div>
         </form>
       </div>
-    </ActionDialog>
+      </DialogContent>
+    </Dialog>
   );
 }

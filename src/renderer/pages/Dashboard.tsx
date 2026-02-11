@@ -4,7 +4,7 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { useApp } from '../contexts/AppContext';
 import { DollarSign, Wrench, Package, TrendingUp, AlertTriangle, Plus, Users, ShoppingCart } from 'lucide-react';
-import { Cliente, Vehiculo, Cotizacion, OrdenTrabajo, Repuesto } from '../types';
+import { Cliente, Vehiculo, Cotizacion, OrdenTrabajo, Repuesto, Venta } from '../types';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import VerOrdenModal from '../components/VerOrdenModal';
 import { kpiCache, KPICache } from '../utils/kpi-cache';
@@ -13,6 +13,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export default function Dashboard() {
   // Usar el contexto para acceder a los datos
   const { clientes, vehiculos, cotizaciones, ordenes, repuestos } = useApp();
+  const [ventas, setVentas] = useState<Venta[]>([]);
   const [ordenSeleccionada, setOrdenSeleccionada] = useState<OrdenTrabajo | null>(null);
   const [isVerModalOpen, setIsVerModalOpen] = useState(false);
   
@@ -85,10 +86,23 @@ export default function Dashboard() {
   // Estado para ingresos del mes (incluye pagos de cuotas)
   const [ingresosMes, setIngresosMes] = useState(0);
 
+  useEffect(() => {
+    const cargarVentas = async () => {
+      try {
+        const data = await window.electronAPI.getAllVentas();
+        setVentas(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error('Error obteniendo ventas rápidas:', error);
+      }
+    };
+
+    cargarVentas();
+  }, []);
+
   // Calcular ingresos del mes actual (incluyendo pagos de cuotas)
   useEffect(() => {
     const calcularIngresos = async () => {
-      const cacheKey = KPICache.generateKey('ingresosMes', [ordenes, mesActual, añoActual]);
+      const cacheKey = KPICache.generateKey('ingresosMes', [ordenes, ventas, mesActual, añoActual]);
       const cached = kpiCache.get<number>(cacheKey);
       if (cached !== null) {
         setIngresosMes(cached);
@@ -112,6 +126,17 @@ export default function Dashboard() {
 
       result += ordenesPagoInmediato;
 
+      const ventasRapidasMes = ventas
+        .filter(v => {
+          if (!v.fecha) return false;
+          const fechaVenta = new Date(v.fecha);
+          return fechaVenta.getMonth() === mesActual &&
+                 fechaVenta.getFullYear() === añoActual;
+        })
+        .reduce((sum, v) => sum + (v.total || 0), 0);
+
+      result += ventasRapidasMes;
+
       // Sumar pagos de cuotas realizados este mes
       try {
         const cuotas = await window.electronAPI.getAllCuotasPago();
@@ -134,7 +159,7 @@ export default function Dashboard() {
     };
 
     calcularIngresos();
-  }, [ordenes, mesActual, añoActual]);
+  }, [ordenes, ventas, mesActual, añoActual]);
   
   // Estado para ingresos del mes anterior (incluye pagos de cuotas)
   const [ingresosMesAnterior, setIngresosMesAnterior] = useState(0);
@@ -143,7 +168,7 @@ export default function Dashboard() {
   useEffect(() => {
     const calcularIngresosAnterior = async () => {
       const mesAnterior = new Date(añoActual, mesActual - 1, 1);
-      const cacheKey = KPICache.generateKey('ingresosMesAnterior', [ordenes, mesAnterior.getMonth(), mesAnterior.getFullYear()]);
+      const cacheKey = KPICache.generateKey('ingresosMesAnterior', [ordenes, ventas, mesAnterior.getMonth(), mesAnterior.getFullYear()]);
       const cached = kpiCache.get<number>(cacheKey);
       if (cached !== null) {
         setIngresosMesAnterior(cached);
@@ -167,6 +192,17 @@ export default function Dashboard() {
 
       result += ordenesPagoInmediato;
 
+      const ventasRapidasMesAnterior = ventas
+        .filter(v => {
+          if (!v.fecha) return false;
+          const fechaVenta = new Date(v.fecha);
+          return fechaVenta.getMonth() === mesAnterior.getMonth() &&
+                 fechaVenta.getFullYear() === mesAnterior.getFullYear();
+        })
+        .reduce((sum, v) => sum + (v.total || 0), 0);
+
+      result += ventasRapidasMesAnterior;
+
       // Sumar pagos de cuotas del mes anterior
       try {
         const cuotas = await window.electronAPI.getAllCuotasPago();
@@ -189,7 +225,7 @@ export default function Dashboard() {
     };
 
     calcularIngresosAnterior();
-  }, [ordenes, mesActual, añoActual]);
+  }, [ordenes, ventas, mesActual, añoActual]);
   
   // Calcular porcentaje de cambio (memoizado con caché)
   const cambioPorcentaje = useMemo(() => {
@@ -207,17 +243,21 @@ export default function Dashboard() {
   
   // Calcular ingresos totales (memoizado con caché)
   const ingresosTotales = useMemo(() => {
-    const cacheKey = KPICache.generateKey('ingresosTotales', [ordenes]);
+    const cacheKey = KPICache.generateKey('ingresosTotales', [ordenes, ventas]);
     const cached = kpiCache.get<number>(cacheKey);
     if (cached !== null) return cached;
 
-    const result = ordenes
+    const totalOrdenes = ordenes
       .filter(o => o.estado === 'Completada')
       .reduce((sum, o) => sum + (o.total || 0), 0);
+
+    const totalVentas = ventas.reduce((sum, v) => sum + (v.total || 0), 0);
+    
+    const result = totalOrdenes + totalVentas;
     
     kpiCache.set(cacheKey, result, 30000);
     return result;
-  }, [ordenes]);
+  }, [ordenes, ventas]);
   
   // Inventario bajo (memoizado con caché)
   const inventarioBajo = useMemo(() => {
@@ -255,7 +295,7 @@ export default function Dashboard() {
       const mesReferencia = new Date();
       mesReferencia.setMonth(mesReferencia.getMonth() - (5 - i));
       
-      const ventasMes = ordenes
+      const ventasOrdenesMes = ordenes
         .filter(o => {
           if (!o.fechaIngreso) return false;
           const fechaOrden = new Date(o.fechaIngreso);
@@ -263,15 +303,24 @@ export default function Dashboard() {
                  fechaOrden.getFullYear() === mesReferencia.getFullYear();
         })
         .reduce((sum, o) => sum + (o.total || 0), 0);
+
+      const ventasRapidasMes = ventas
+        .filter(v => {
+          if (!v.fecha) return false;
+          const fechaVenta = new Date(v.fecha);
+          return fechaVenta.getMonth() === mesReferencia.getMonth() &&
+                 fechaVenta.getFullYear() === mesReferencia.getFullYear();
+        })
+        .reduce((sum, v) => sum + (v.total || 0), 0);
       
       datosVentas.push({
         month: meses[i],
-        sales: ventasMes || 0
+        sales: (ventasOrdenesMes + ventasRapidasMes) || 0
       });
     }
     
     return datosVentas;
-  }, [ordenes]);
+  }, [ordenes, ventas]);
 
   // Datos de órdenes de trabajo (memoizado)
   const workOrdersData = useMemo(() => [
@@ -413,14 +462,14 @@ export default function Dashboard() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Button
-              onClick={() => window.dispatchEvent(new CustomEvent('app:nueva-orden'))}
+              onClick={() => window.dispatchEvent(new CustomEvent('app:quick-action', { detail: { action: 'nueva-orden' } }))}
               className="h-24 flex-col gap-2 bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               <Plus className="h-6 w-6" />
               <span className="font-semibold">Nueva Orden</span>
             </Button>
             <Button
-              onClick={() => window.dispatchEvent(new CustomEvent('app:nuevo-cliente'))}
+              onClick={() => window.dispatchEvent(new CustomEvent('app:quick-action', { detail: { action: 'nuevo-cliente' } }))}
               variant="outline"
               className="h-24 flex-col gap-2 border-2 hover:bg-slate-50"
             >
@@ -428,7 +477,7 @@ export default function Dashboard() {
               <span className="font-semibold">Nuevo Cliente</span>
             </Button>
             <Button
-              onClick={() => {/* Implementar venta rápida */}}
+              onClick={() => window.dispatchEvent(new CustomEvent('app:quick-action', { detail: { action: 'venta-rapida' } }))}
               variant="outline"
               className="h-24 flex-col gap-2 border-2 hover:bg-slate-50"
             >

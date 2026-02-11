@@ -78,6 +78,19 @@ export interface OrdenTrabajo {
   fechaPago?: string;
 }
 
+export interface Recordatorio {
+  id?: number;
+  clienteId?: number | null;
+  vehiculoId?: number | null;
+  tipo: 'Mantenimiento' | 'Revisión' | 'Otro' | string;
+  kilometraje?: number | null;
+  fechaAviso: string;
+  observaciones?: string;
+  estado: 'Pendiente' | 'Enviado';
+  fechaCreacion?: string;
+  fechaEnvio?: string | null;
+}
+
 export interface DetalleOrden {
   id?: number;
   ordenId: number;
@@ -132,6 +145,53 @@ export interface CuotaPago {
   fechaPago?: string;
   estado: 'Pendiente' | 'Pagada' | 'Vencida';
   observaciones?: string;
+}
+
+export interface Venta {
+  id?: number;
+  numero: string;
+  clienteId?: number;
+  clienteNombre?: string;
+  clienteRut?: string;
+  clienteTelefono?: string;
+  clienteEmail?: string;
+  fecha: string;
+  total: number;
+  metodoPago?: 'Efectivo' | 'Débito' | 'Crédito';
+  observaciones?: string;
+}
+
+export interface DetalleVenta {
+  id?: number;
+  ventaId: number;
+  repuestoId: number;
+  cantidad: number;
+  precio: number;
+  subtotal: number;
+  descripcion: string;
+}
+
+export interface Proveedor {
+  id?: number;
+  nombre: string;
+  tipoContribuyente?: string;
+  direccionFiscal?: string;
+  nombreFantasia?: string;
+  identificacionTributaria?: string;
+  ciudadFiscal?: string;
+  telefono?: string;
+  email?: string;
+  personaContacto?: string;
+  telefonoAlternativo?: string;
+  emailAlternativo?: string;
+  comentario?: string;
+  activo?: boolean;
+}
+
+export interface Categoria {
+  id?: number;
+  nombre: string;
+  activo?: boolean;
 }
 
 // Tipos para estadísticas del dashboard

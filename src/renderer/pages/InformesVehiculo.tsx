@@ -1,6 +1,42 @@
+import { useMemo, useState } from 'react';
 import { Card, CardContent } from '../components/ui/card';
+import { useApp } from '../contexts/AppContext';
 
 export default function InformesVehiculoPage() {
+  const { vehiculos, ordenes } = useApp();
+  const [fechaInput, setFechaInput] = useState('');
+  const [patenteSearch, setPatenteSearch] = useState('');
+  const [vehiculoId, setVehiculoId] = useState('');
+  const [fechaFiltro, setFechaFiltro] = useState('');
+  const [vehiculoFiltro, setVehiculoFiltro] = useState('');
+
+  const vehiculosFiltrados = useMemo(() => {
+    const term = patenteSearch.trim().toLowerCase();
+    if (!term) return vehiculos;
+    return vehiculos.filter((vehiculo) => {
+      const patente = vehiculo.patente?.toLowerCase() || '';
+      const marca = vehiculo.marca?.toLowerCase() || '';
+      const modelo = vehiculo.modelo?.toLowerCase() || '';
+      return patente.includes(term) || marca.includes(term) || modelo.includes(term);
+    });
+  }, [vehiculos, patenteSearch]);
+
+  const ordenesFiltradas = useMemo(() => {
+    return ordenes.filter((orden) => {
+      if (vehiculoFiltro && String(orden.vehiculoId) !== vehiculoFiltro) return false;
+      if (fechaFiltro) {
+        const fecha = (orden.fechaIngreso || orden.fechaEntrega || '').split('T')[0];
+        if (!fecha || fecha < fechaFiltro) return false;
+      }
+      return true;
+    });
+  }, [ordenes, vehiculoFiltro, fechaFiltro]);
+
+  const handleGenerar = () => {
+    setFechaFiltro(fechaInput);
+    setVehiculoFiltro(vehiculoId);
+  };
+
   return (
     <div className="flex flex-col gap-6 p-6 lg:p-8 bg-background text-foreground">
       <Card className="border border-border bg-white text-gray-900 shadow-sm">
@@ -10,11 +46,8 @@ export default function InformesVehiculoPage() {
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="date"
-                className="h-9 px-3 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-              <span className="text-gray-600">/</span>
-              <input
-                type="date"
+                value={fechaInput}
+                onChange={(e) => setFechaInput(e.target.value)}
                 className="h-9 px-3 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
               />
             </div>
@@ -22,17 +55,33 @@ export default function InformesVehiculoPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-4 items-center">
             <div className="text-sm text-gray-700">Patente :</div>
-            <input
-              type="text"
-              placeholder="Buscar Vehículo..."
-              className="h-9 max-w-xs px-3 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                value={patenteSearch}
+                onChange={(e) => setPatenteSearch(e.target.value)}
+                placeholder="Buscar Vehículo..."
+                className="h-9 max-w-xs px-3 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              <select
+                value={vehiculoId}
+                onChange={(e) => setVehiculoId(e.target.value)}
+                className="h-9 max-w-xs px-3 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              >
+                <option value="">Seleccionar...</option>
+                {vehiculosFiltrados.map((vehiculo) => (
+                  <option key={vehiculo.id} value={vehiculo.id}>
+                    {vehiculo.patente} {vehiculo.marca ? `- ${vehiculo.marca}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-4 items-center">
             <div className="text-sm text-gray-700">Tipo Informe :</div>
             <select className="h-9 max-w-[200px] px-3 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
-              <option>Ordenes</option>
+              <option>Órdenes</option>
             </select>
           </div>
 
@@ -42,7 +91,9 @@ export default function InformesVehiculoPage() {
           </div>
 
           <div>
-            <button className="btn-primary px-4 py-2 text-sm">Generar Informe</button>
+            <button className="btn-primary px-4 py-2 text-sm" onClick={handleGenerar}>
+              Generar Informe
+            </button>
           </div>
 
           <div className="border-t border-gray-200 pt-4">
@@ -67,11 +118,33 @@ export default function InformesVehiculoPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="text-gray-500">
-                    <td className="px-4 py-6 text-center" colSpan={6}>
-                      Sin datos
-                    </td>
-                  </tr>
+                  {ordenesFiltradas.length === 0 ? (
+                    <tr className="text-gray-500">
+                      <td className="px-4 py-6 text-center" colSpan={6}>
+                        Sin datos
+                      </td>
+                    </tr>
+                  ) : (
+                    ordenesFiltradas.map((orden) => {
+                      const bruto = orden.total || 0;
+                      const neto = bruto / 1.19;
+                      const iva = bruto - neto;
+                      const fecha = (orden.fechaIngreso || orden.fechaEntrega || '').split('T')[0];
+                      const vehiculo = vehiculos.find((v) => v.id === orden.vehiculoId);
+                      return (
+                        <tr key={orden.id} className="border border-gray-200 text-gray-700">
+                          <td className="px-4 py-2 text-center">{fecha || '-'}</td>
+                          <td className="px-4 py-2 text-center">{orden.numero}</td>
+                          <td className="px-4 py-2 text-center">
+                            {vehiculo ? `${vehiculo.patente} ${vehiculo.marca || ''}`.trim() : '-'}
+                          </td>
+                          <td className="px-4 py-2 text-center">${neto.toLocaleString('es-CL')}</td>
+                          <td className="px-4 py-2 text-center">${iva.toLocaleString('es-CL')}</td>
+                          <td className="px-4 py-2 text-center">${bruto.toLocaleString('es-CL')}</td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

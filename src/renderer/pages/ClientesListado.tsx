@@ -1,201 +1,95 @@
-import { useEffect, useState } from 'react';
-import { Search, Plus } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Search, Plus, Edit, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
+import { useApp } from '../contexts/AppContext';
+import { notify, confirmAction } from '../utils/cn';
+import { Cliente } from '../types';
+import ClienteForm from '../components/ClienteForm';
+import ClienteVehiculosModal from '../components/ClienteVehiculosModal';
 
 export default function ClientesListadoPage() {
+  const { clientes: initialClientes, vehiculos, refreshClientes } = useApp();
   const [filterStatus, setFilterStatus] = useState('Todos');
   const [filterBy, setFilterBy] = useState('Nombre');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchBy, setSearchBy] = useState('Nom, dni');
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingCliente, setEditingCliente] = useState<Cliente | undefined>();
+  const [vehiculosModalCliente, setVehiculosModalCliente] = useState<Cliente | null>(null);
+
+  const clientes = initialClientes;
 
   useEffect(() => {
-    const handleNuevoCliente = () => setIsFormOpen(true);
+    const handleNuevoCliente = () => {
+      setEditingCliente(undefined);
+      setIsFormOpen(true);
+    };
     window.addEventListener('app:nuevo-cliente', handleNuevoCliente as EventListener);
     return () => window.removeEventListener('app:nuevo-cliente', handleNuevoCliente as EventListener);
   }, []);
 
-  if (isFormOpen) {
-    return (
-      <div className="flex flex-col h-full bg-background text-foreground">
-        <div className="flex items-center justify-end px-6 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsFormOpen(false)}
-              className="px-4 py-2 text-sm font-medium rounded border border-border text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Volver
-            </button>
-            <button
-              onClick={() => setIsFormOpen(false)}
-              className="px-4 py-2 text-sm font-medium rounded border border-border text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button className="btn-primary text-sm px-4 py-2 rounded-md">
-              Confirmar
-            </button>
-          </div>
-        </div>
+  const filteredClientes = useMemo(() => {
+    let filtered = [...clientes];
 
-        <div className="p-6">
-          <Card className="border border-border shadow-sm">
-            <CardContent className="p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Nombre<span className="text-red-600">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Tipo documento:</label>
-                    <input
-                      type="text"
-                      placeholder="RUT"
-                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Domicilio:</label>
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Localidad:</label>
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                </div>
+    // Filtrar por estado
+    if (filterStatus === 'Activos') {
+      filtered = filtered.filter(c => c.activo !== false);
+    } else if (filterStatus === 'Inactivos') {
+      filtered = filtered.filter(c => c.activo === false);
+    }
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Nombre fantasía</label>
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">RUT</label>
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Tipo responsable</label>
-                    <select className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
-                      <option>Consumidor Final</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
+    // Filtrar por búsqueda
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(c => {
+        if (searchBy === 'Nom, dni' || searchBy === 'Nombre') {
+          return c.nombre?.toLowerCase().includes(term) || c.rut?.toLowerCase().includes(term);
+        } else if (searchBy === 'RUT') {
+          return c.rut?.toLowerCase().includes(term);
+        }
+        return true;
+      });
+    }
 
-              <div className="border-t border-gray-200 pt-6">
-                <div className="text-sm font-medium text-gray-700 mb-4">Contacto</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Teléfono:</label>
-                      <input
-                        type="text"
-                        className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Email:</label>
-                      <input
-                        type="text"
-                        className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Persona contacto:</label>
-                      <input
-                        type="text"
-                        className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Teléfono alternativo:</label>
-                      <input
-                        type="text"
-                        className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Email alternativo:</label>
-                      <input
-                        type="text"
-                        className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
+    return filtered;
+  }, [clientes, filterStatus, searchTerm, searchBy]);
 
-              <div className="border-t border-gray-200 pt-6">
-                <div className="text-sm font-medium text-gray-700 mb-4">Vehículos</div>
-                <div className="flex items-center gap-2 mb-4">
-                  <label className="text-sm text-gray-700 min-w-[140px]">Buscar Vehículo :</label>
-                  <input
-                    type="text"
-                    placeholder="..."
-                    className="flex-1 px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                  />
-                  <button className="h-9 w-9 rounded-md bg-red-600 text-white flex items-center justify-center">
-                    <Plus className="h-4 w-4" />
-                  </button>
-                </div>
-                <div className="overflow-x-auto border border-gray-200 rounded-md">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-gray-700">
-                        <th className="px-4 py-2 text-left font-semibold">Vehículo</th>
-                        <th className="px-4 py-2 text-left font-semibold">Patente</th>
-                        <th className="px-4 py-2 text-left font-semibold">Tipo</th>
-                        <th className="px-4 py-2 text-left font-semibold">Color</th>
-                        <th className="px-4 py-2 text-left font-semibold">Año</th>
-                        <th className="px-4 py-2 text-left font-semibold">N° Chasis</th>
-                        <th className="px-4 py-2 text-left font-semibold">CC</th>
-                        <th className="px-4 py-2 text-left font-semibold">Seguro</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="border-b border-gray-200 text-gray-500">
-                        <td className="px-4 py-6 text-center" colSpan={8}>
-                          No hay vehículos asociados
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+  const handleEdit = (cliente: Cliente) => {
+    setEditingCliente(cliente);
+    setIsFormOpen(true);
+  };
 
-              <div className="border-t border-gray-200 pt-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Comentario :</label>
-                <textarea
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+  const handleDelete = async (clienteId: number) => {
+    const confirmed = await confirmAction(
+      '¿Estás seguro?',
+      'Esta acción no se puede deshacer. El cliente será eliminado permanentemente.'
     );
-  }
+    
+    if (!confirmed) return;
+
+    try {
+      await window.electronAPI?.deleteCliente(clienteId);
+      notify.success('Éxito', 'Cliente eliminado');
+      refreshClientes();
+    } catch (error: any) {
+      notify.error('Error', 'No se pudo eliminar el cliente: ' + (error.message || 'Error desconocido'));
+    }
+  };
+
+  const handleSaveCliente = async (cliente: Cliente) => {
+    try {
+      await refreshClientes();
+      setIsFormOpen(false);
+      setEditingCliente(undefined);
+      notify.success('Éxito', editingCliente ? 'Cliente actualizado' : 'Cliente creado');
+    } catch (error: any) {
+      notify.error('Error', 'No se pudo guardar el cliente');
+    }
+  };
+
+  const getVehiculosCount = (clienteId: number) => {
+    return vehiculos.filter(v => v.clienteId === clienteId).length;
+  };
 
   return (
     <div className="flex flex-col gap-6 p-6 lg:p-8 bg-background text-foreground">
@@ -209,13 +103,16 @@ export default function ClientesListadoPage() {
           <option>Activos</option>
           <option>Inactivos</option>
         </select>
-        <button onClick={() => setIsFormOpen(true)} className="btn-primary">Nuevo</button>
+        <button onClick={() => { setEditingCliente(undefined); setIsFormOpen(true); }} className="btn-primary flex items-center gap-2">
+          <Plus className="h-4 w-4" />
+          Nuevo
+        </button>
       </div>
 
       <Card className="border border-border shadow-sm">
         <CardContent className="p-4 space-y-4">
           <div className="rounded-md bg-sky-600 text-white text-sm px-4 py-3">
-            Hemos actualizado el sistema de asociación de clientes y Vehículos. Además de la asignación automática que se realiza al crear una orden de servicio, ahora podés administrar los Vehículos asociados a tus clientes de manera independiente. Podés administrar los Vehículos de tus clientes desde este apartado haciendo click en "Editar" sobre el cliente que desees trabajar. Los Vehículos actualmente asignados se deben a una vinculación automática de tu histórico de órdenes con los clientes que tienen un número de identificación único, como el RUT o el correo electrónico.
+            Hemos actualizado el sistema de asociación de clientes y Vehículos. Además de la asignación automática que se realiza al crear una orden de servicio, ahora puedes administrar los Vehículos asociados a tus clientes de manera independiente. Puedes administrar los Vehículos de tus clientes desde este apartado haciendo clic en "Editar" sobre el cliente con el que deseas trabajar. Los Vehículos actualmente asignados se deben a una vinculación automática de tu histórico de órdenes con los clientes que tienen un número de identificación único, como el RUT o el correo electrónico.
           </div>
 
           <div className="flex items-center justify-between gap-4">
@@ -229,9 +126,6 @@ export default function ClientesListadoPage() {
                 <option>Identificación</option>
                 <option>Condición</option>
               </select>
-              <button className="h-9 w-9 rounded-md border border-gray-300 bg-white text-gray-700">
-                ▲
-              </button>
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -264,22 +158,77 @@ export default function ClientesListadoPage() {
                   <th className="px-4 py-2 text-left font-semibold">Identificación</th>
                   <th className="px-4 py-2 text-left font-semibold">Condición</th>
                   <th className="px-4 py-2 text-left font-semibold">Teléfono</th>
-                  <th className="px-4 py-2 text-left font-semibold">Domicilio</th>
-                  <th className="px-4 py-2 text-left font-semibold">Localidad</th>
+                  <th className="px-4 py-2 text-left font-semibold">Dirección</th>
+                  <th className="px-4 py-2 text-left font-semibold">Ciudad</th>
                   <th className="px-4 py-2 text-left font-semibold">Vehículos</th>
+                  <th className="px-4 py-2 text-left font-semibold">Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-border text-gray-500">
-                  <td className="px-4 py-6 text-center" colSpan={7}>
-                    No hay clientes registrados
-                  </td>
-                </tr>
+                {filteredClientes.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-6 text-center" colSpan={8}>
+                      No hay clientes registrados
+                    </td>
+                  </tr>
+                ) : (
+                  filteredClientes.map((cliente) => (
+                    <tr key={cliente.id} className="border-b border-border text-gray-700 hover:bg-gray-50">
+                      <td className="px-4 py-2">{cliente.nombre}</td>
+                      <td className="px-4 py-2">{cliente.rut || '-'}</td>
+                      <td className="px-4 py-2">{cliente.activo !== false ? 'Activo' : 'Inactivo'}</td>
+                      <td className="px-4 py-2">{cliente.telefono || '-'}</td>
+                      <td className="px-4 py-2">{cliente.direccion || '-'}</td>
+                      <td className="px-4 py-2">-</td>
+                      <td className="px-4 py-2">{getVehiculosCount(cliente.id || 0)}</td>
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleEdit(cliente)}
+                            className="p-1 text-blue-600 hover:text-blue-800"
+                            title="Editar"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setVehiculosModalCliente(cliente)}
+                            className="p-1 text-green-600 hover:text-green-800"
+                            title="Gestionar vehículos"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => cliente.id && handleDelete(cliente.id)}
+                            className="p-1 text-red-600 hover:text-red-800"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </CardContent>
       </Card>
+
+      <ClienteForm
+        cliente={editingCliente}
+        isOpen={isFormOpen}
+        onClose={() => { setIsFormOpen(false); setEditingCliente(undefined); }}
+        onSave={handleSaveCliente}
+      />
+
+      {vehiculosModalCliente && (
+        <ClienteVehiculosModal
+          cliente={vehiculosModalCliente}
+          isOpen={!!vehiculosModalCliente}
+          onClose={() => setVehiculosModalCliente(null)}
+        />
+      )}
     </div>
   );
 }

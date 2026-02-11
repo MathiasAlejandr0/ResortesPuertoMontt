@@ -393,6 +393,7 @@ Email: {EMAIL_TALLER}`
         valor: JSON.stringify(mensajesPredefinidos),
         descripcion: 'Mensajes predefinidos para WhatsApp y Email'
       });
+      window.dispatchEvent(new CustomEvent('config-updated', { detail: { clave: 'mensajes_predefinidos' } }));
       toast.success('Mensajes predefinidos guardados exitosamente');
     } catch (error) {
       console.error('Error guardando mensajes:', error);
@@ -549,6 +550,7 @@ Email: {EMAIL_TALLER}`
         valor: JSON.stringify(negocioInfo),
         descripcion: 'Información del negocio'
       });
+      window.dispatchEvent(new CustomEvent('config-updated', { detail: { clave: 'negocio_info' } }));
       toast.success('Información del negocio guardada exitosamente');
     } catch (error) {
       console.error('Error guardando información del negocio:', error);

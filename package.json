@@ -130,9 +130,19 @@
       "assets/**/*"
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
       "icon": "assets/icon.png",
-      "publisherName": "Resortes Puerto Montt"
+      "publisherName": "Resortes Puerto Montt",
+      "artifactName": "${productName}-${version}-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -151,7 +161,8 @@
       "runAfterFinish": true,
       "menuCategory": true,
       "deleteAppDataOnUninstall": false,
-      "perMachine": true
+      "perMachine": true,
+      "warningsAsErrors": false
     }
   }
 }

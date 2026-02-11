@@ -14,7 +14,7 @@ export interface Migration {
 
 export class MigrationService {
   private migrations: Migration[] = [];
-  private currentVersion: string = '1.2.0';
+  private currentVersion: string = '1.2.1';
 
   constructor() {
     this.registerMigrations();
@@ -150,6 +150,52 @@ export class MigrationService {
               if (err) reject(err);
               else resolve();
             });
+          });
+        });
+      },
+    });
+
+    // Migración 1.2.1: Módulo de Recordatorios
+    this.migrations.push({
+      version: '1.2.1',
+      description: 'Agregar tabla de recordatorios e índices',
+      up: async (db: sqlite3.Database) => {
+        return new Promise((resolve, reject) => {
+          db.serialize(() => {
+            db.run(
+              `CREATE TABLE IF NOT EXISTS recordatorios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                clienteId INTEGER,
+                vehiculoId INTEGER,
+                tipo TEXT NOT NULL,
+                kilometraje INTEGER,
+                fechaAviso DATETIME NOT NULL,
+                observaciones TEXT,
+                estado TEXT NOT NULL DEFAULT 'Pendiente' CHECK (estado IN ('Pendiente', 'Enviado')),
+                fechaCreacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                fechaEnvio DATETIME,
+                FOREIGN KEY (clienteId) REFERENCES clientes(id) ON DELETE SET NULL,
+                FOREIGN KEY (vehiculoId) REFERENCES vehiculos(id) ON DELETE SET NULL
+              )`,
+              (err: any) => {
+                if (err && !err.message.includes('already exists')) {
+                  console.error('Error creando tabla recordatorios:', err);
+                  reject(err);
+                  return;
+                }
+              }
+            );
+
+            db.run('CREATE INDEX IF NOT EXISTS idx_recordatorios_fecha ON recordatorios(fechaAviso)');
+
+            db.run(
+              `INSERT OR REPLACE INTO configuracion (clave, valor, descripcion)
+               VALUES ('schema_version', '1.2.1', 'Versión del esquema de base de datos')`,
+              (err) => {
+                if (err) reject(err);
+                else resolve();
+              }
+            );
           });
         });
       },

@@ -12,6 +12,7 @@ import {
   RepuestoSchema,
   ServicioSchema,
   PaginationSchema,
+  RecordatorioSchema,
   SaveClienteConVehiculosSchema,
   SaveCotizacionConDetallesSchema,
   SaveOrdenTrabajoConDetallesSchema,
@@ -20,11 +21,13 @@ import {
 } from './validation-schemas';
 import { persistentLogger } from './logger-persistente';
 import { ExcelImportService } from './services/ExcelImportService';
+import { ExcelExportService } from './services/ExcelExportService';
 import { getInvoiceParserService } from './services/InvoiceParserService';
 
 let mainWindow: BrowserWindow;
 let dbService: DatabaseService | null = null;
 let excelImportService: ExcelImportService | null = null;
+let excelExportService: ExcelExportService | null = null;
 
 // Desactivar Autofill completamente para evitar mensajes de error benignos en la consola
 // Esto debe hacerse ANTES de que la app esté lista
@@ -846,6 +849,18 @@ ipcMain.handle('save-venta', async (event, ventaData) => {
   }
 });
 
+ipcMain.handle('get-all-ventas', async () => {
+  console.log('📞 IPC: get-all-ventas');
+  try {
+    const result = await ensureDbService().getAllVentas();
+    console.log('✅ IPC: get-all-ventas exitoso, registros:', result.length);
+    return result;
+  } catch (error) {
+    console.error('❌ IPC: Error obteniendo ventas:', error);
+    throw error;
+  }
+});
+
 ipcMain.handle('get-detalles-orden', async (_event, ordenId) => {
   console.log('📞 IPC: get-detalles-orden', ordenId);
   try {
@@ -854,6 +869,30 @@ ipcMain.handle('get-detalles-orden', async (_event, ordenId) => {
     return result;
   } catch (error) {
     console.error('❌ IPC: Error obteniendo detalles de orden:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('get-all-detalles-orden', async () => {
+  console.log('📞 IPC: get-all-detalles-orden');
+  try {
+    const result = await ensureDbService().getAllDetallesOrden();
+    console.log('✅ IPC: get-all-detalles-orden exitoso, registros:', result.length);
+    return result;
+  } catch (error) {
+    console.error('❌ IPC: Error obteniendo detalles de orden:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('get-all-detalles-venta', async () => {
+  console.log('📞 IPC: get-all-detalles-venta');
+  try {
+    const result = await ensureDbService().getAllDetallesVenta();
+    console.log('✅ IPC: get-all-detalles-venta exitoso, registros:', result.length);
+    return result;
+  } catch (error) {
+    console.error('❌ IPC: Error obteniendo detalles de venta:', error);
     throw error;
   }
 });
@@ -1010,6 +1049,32 @@ ipcMain.handle('save-repuesto', async (event, repuesto) => {
   } catch (error) {
     console.error('❌ IPC: Error guardando repuesto:', error);
     throw error;
+  }
+});
+
+ipcMain.handle('save-repuestos-batch', async (_event, repuestos) => {
+  console.log('📞 IPC: save-repuestos-batch');
+  try {
+    if (!Array.isArray(repuestos)) {
+      throw new Error('Formato inválido para repuestos');
+    }
+    const repuestosValidados = repuestos.map((repuesto) => validateData(RepuestoSchema, repuesto));
+    const result = await ensureDbService().saveRepuestosBatch(repuestosValidados as any);
+    console.log('✅ IPC: save-repuestos-batch exitoso');
+    return result;
+  } catch (error) {
+    console.error('❌ IPC: Error guardando repuestos:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('delete-repuestos-batch', async (_event, ids: number[]) => {
+  try {
+    const deleted = await ensureDbService().deleteRepuestosByIds(Array.isArray(ids) ? ids : []);
+    return { success: true, deleted };
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: delete-repuestos-batch - Error:', error);
+    return { success: false, error: error?.message || 'Error eliminando repuestos' };
   }
 });
 
@@ -1848,6 +1913,228 @@ ipcMain.handle('get-arqueo-caja', async (_event, fecha: string) => {
   }
 });
 
+ipcMain.handle('get-all-cierres-caja', async (_event, fechaDesde?: string, fechaHasta?: string) => {
+  try {
+    const cierres = await ensureDbService().getAllCierresCaja(fechaDesde, fechaHasta);
+    return cierres;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-all-cierres-caja - Error:', error);
+    return [];
+  }
+});
+
+// ========== HANDLERS PARA USUARIOS ==========
+ipcMain.handle('get-all-usuarios', async () => {
+  try {
+    const usuarios = await ensureDbService().getAllUsuarios();
+    return usuarios;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-all-usuarios - Error:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('delete-usuario', async (_event, id: number) => {
+  try {
+    const resultado = await ensureDbService().deleteUsuario(id);
+    return resultado;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: delete-usuario - Error:', error);
+    throw error;
+  }
+});
+
+// Handlers para proveedores
+ipcMain.handle('get-all-proveedores', async () => {
+  try {
+    const proveedores = await ensureDbService().getAllProveedores();
+    return proveedores;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-all-proveedores - Error:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('save-proveedor', async (_event, proveedor: any) => {
+  try {
+    const proveedorGuardado = await ensureDbService().saveProveedor(proveedor);
+    return proveedorGuardado;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: save-proveedor - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('delete-proveedor', async (_event, id: number) => {
+  try {
+    const resultado = await ensureDbService().deleteProveedor(id);
+    return resultado;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: delete-proveedor - Error:', error);
+    throw error;
+  }
+});
+
+// Handlers para categorías
+ipcMain.handle('get-all-categorias', async () => {
+  try {
+    const categorias = await ensureDbService().getAllCategorias();
+    return categorias;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-all-categorias - Error:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('save-categoria', async (_event, categoria: any) => {
+  try {
+    const categoriaGuardada = await ensureDbService().saveCategoria(categoria);
+    return categoriaGuardada;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: save-categoria - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('delete-categoria', async (_event, id: number) => {
+  try {
+    const resultado = await ensureDbService().deleteCategoria(id);
+    return resultado;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: delete-categoria - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('delete-servicio', async (_event, id: number) => {
+  try {
+    const resultado = await ensureDbService().deleteServicio(id);
+    return resultado;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: delete-servicio - Error:', error);
+    throw error;
+  }
+});
+
+// ========== HANDLERS PARA EXPORTACIÓN ==========
+ipcMain.handle('export-data', async (_event, tipo: string) => {
+  try {
+    if (!excelExportService) {
+      excelExportService = new ExcelExportService();
+    }
+
+    let result: { success: boolean; filePath?: string; error?: string };
+
+    switch (tipo) {
+      case 'Productos':
+        const productos = await ensureDbService().getAllRepuestos();
+        result = await excelExportService.exportProductos(mainWindow, productos);
+        break;
+
+      case 'Órdenes de trabajo':
+        const ordenes = await ensureDbService().getAllOrdenesTrabajo();
+        result = await excelExportService.exportOrdenes(mainWindow, ordenes);
+        break;
+
+      case 'Clientes':
+        const clientes = await ensureDbService().getAllClientes();
+        result = await excelExportService.exportClientes(mainWindow, clientes);
+        break;
+
+      case 'Ventas':
+        const ventas = await ensureDbService().getAllVentas();
+        result = await excelExportService.exportVentas(mainWindow, ventas);
+        break;
+
+      case 'Proveedores':
+        const proveedores = await ensureDbService().getAllProveedores();
+        result = await excelExportService.exportProveedores(mainWindow, proveedores);
+        break;
+
+      case 'Servicios':
+        const servicios = await ensureDbService().getAllServicios();
+        result = await excelExportService.exportServicios(mainWindow, servicios);
+        break;
+
+      case 'Trabajadores':
+        const trabajadores = await ensureDbService().getAllUsuarios();
+        result = await excelExportService.exportTrabajadores(mainWindow, trabajadores);
+        break;
+
+      case 'Categorías':
+        const categorias = await ensureDbService().getAllCategorias();
+        result = await excelExportService.exportCategorias(mainWindow, categorias);
+        break;
+
+      case 'Recordatorios':
+      case 'Avisos Programados':
+        const recordatorios = await ensureDbService().getAllRecordatorios();
+        result = await excelExportService.exportRecordatorios(mainWindow, recordatorios);
+        break;
+
+      case 'Movimientos de caja':
+        // Necesitamos agregar getAllMovimientosCaja a database.ts
+        const movimientos = await ensureDbService().getAllMovimientosCaja();
+        result = await excelExportService.exportMovimientosCaja(mainWindow, movimientos);
+        break;
+
+      case 'Cierres de cajas':
+        const cierres = await ensureDbService().getAllCierresCaja();
+        result = await excelExportService.exportCierresCaja(mainWindow, cierres);
+        break;
+
+      default:
+        return { success: false, error: 'Tipo de exportación no soportado' };
+    }
+
+    return result;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: export-data - Error:', error);
+    return { success: false, error: error.message || 'Error al exportar' };
+  }
+});
+
+ipcMain.handle('save-usuario', async (_event, usuario: any) => {
+  try {
+    const usuarioGuardado = await ensureDbService().saveUsuario(usuario);
+    return { success: true, data: usuarioGuardado };
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: save-usuario - Error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ========== HANDLERS PARA PAGOS DE TRABAJADORES ==========
+ipcMain.handle('save-pago-trabajador', async (_event, pagoData) => {
+  try {
+    const pago = await ensureDbService().savePagoTrabajador(pagoData);
+    return { success: true, data: pago };
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: save-pago-trabajador - Error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-all-pagos-trabajadores', async () => {
+  try {
+    const pagos = await ensureDbService().getAllPagosTrabajadores();
+    return pagos;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-all-pagos-trabajadores - Error:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('get-pagos-trabajadores-por-fecha', async (_event, fecha: string) => {
+  try {
+    const pagos = await ensureDbService().getPagosTrabajadoresPorFecha(fecha);
+    return pagos;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-pagos-trabajadores-por-fecha - Error:', error);
+    return [];
+  }
+});
+
 // ========== HANDLERS PARA COMISIONES DE TÉCNICOS ==========
 
 ipcMain.handle('calcular-y-guardar-comision', async (_event, ordenId: number, tecnicoId: number | null, tecnicoNombre: string, porcentajeComision: number) => {
@@ -1899,5 +2186,47 @@ ipcMain.handle('get-ordenes-para-agenda', async (_event, fechaInicio: string, fe
   } catch (error: any) {
     persistentLogger.error('❌ IPC: get-ordenes-para-agenda - Error:', error);
     return [];
+  }
+});
+
+// ========== HANDLERS PARA RECORDATORIOS ==========
+
+ipcMain.handle('get-all-recordatorios', async () => {
+  try {
+    const recordatorios = await ensureDbService().getAllRecordatorios();
+    return recordatorios;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: get-all-recordatorios - Error:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('save-recordatorio', async (_event, recordatorio) => {
+  try {
+    const recordatorioValidado = validateData(RecordatorioSchema, recordatorio);
+    const result = await ensureDbService().saveRecordatorio(recordatorioValidado as any);
+    return result;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: save-recordatorio - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('delete-recordatorio', async (_event, id: number) => {
+  try {
+    return await ensureDbService().deleteRecordatorio(id);
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: delete-recordatorio - Error:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('update-recordatorio-estado', async (_event, data: { id: number; estado: 'Pendiente' | 'Enviado' }) => {
+  try {
+    const result = await ensureDbService().updateRecordatorioEstado(data.id, data.estado);
+    return result;
+  } catch (error: any) {
+    persistentLogger.error('❌ IPC: update-recordatorio-estado - Error:', error);
+    throw error;
   }
 });

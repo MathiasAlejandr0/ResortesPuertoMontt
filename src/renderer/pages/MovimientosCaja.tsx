@@ -1,18 +1,123 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
+import { notify } from '../utils/cn';
 
 export default function MovimientosCajaPage() {
   const [filterBy, setFilterBy] = useState('Fecha');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchBy, setSearchBy] = useState('Comentario');
   const [fechaDesde, setFechaDesde] = useState('');
-  const [fechaHasta, setFechaHasta] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [metodoPago, setMetodoPago] = useState('');
   const [montoEfectivo, setMontoEfectivo] = useState('');
   const [montoOtros, setMontoOtros] = useState('');
   const [detalle, setDetalle] = useState('');
+  const [movimientos, setMovimientos] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fechaSeleccionada = fechaDesde || new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    const cargarMovimientos = async () => {
+      try {
+        if (!window.electronAPI) return;
+        const data = await window.electronAPI.getMovimientosCajaPorFecha(fechaSeleccionada);
+        setMovimientos(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error('Error cargando movimientos:', error);
+      }
+    };
+    cargarMovimientos();
+  }, [fechaSeleccionada]);
+
+  const mapMetodoPago = (value: string) => {
+    const lower = value.toLowerCase();
+    if (lower.includes('crédito')) return 'Crédito';
+    if (lower.includes('débito')) return 'Débito';
+    if (lower.includes('transferencia')) return 'Transferencia';
+    return 'Transferencia';
+  };
+
+  const handleConfirm = async () => {
+    if (!window.electronAPI) return;
+    const efectivo = Number(montoEfectivo || 0);
+    const otros = Number(montoOtros || 0);
+
+    if (!detalle.trim()) {
+      notify.error('Validación', 'Debes ingresar un detalle.');
+      return;
+    }
+
+    if (efectivo === 0 && otros === 0) {
+      notify.error('Validación', 'Debes ingresar un monto.');
+      return;
+    }
+
+    if (otros !== 0 && !metodoPago) {
+      notify.error('Validación', 'Selecciona un método de pago para el monto en otros.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const fecha = new Date().toISOString();
+      const movimientosParaGuardar: any[] = [];
+
+      if (efectivo !== 0) {
+        movimientosParaGuardar.push({
+          tipo: efectivo < 0 ? 'egreso' : 'ingreso',
+          monto: Math.abs(efectivo),
+          descripcion: detalle.trim(),
+          metodo_pago: 'Efectivo',
+          fecha,
+        });
+      }
+
+      if (otros !== 0) {
+        movimientosParaGuardar.push({
+          tipo: otros < 0 ? 'egreso' : 'ingreso',
+          monto: Math.abs(otros),
+          descripcion: detalle.trim(),
+          metodo_pago: mapMetodoPago(metodoPago),
+          fecha,
+        });
+      }
+
+      for (const movimiento of movimientosParaGuardar) {
+        await window.electronAPI.registrarMovimientoCaja(movimiento);
+      }
+
+      const data = await window.electronAPI.getMovimientosCajaPorFecha(fechaSeleccionada);
+      setMovimientos(Array.isArray(data) ? data : []);
+      setMontoEfectivo('');
+      setMontoOtros('');
+      setMetodoPago('');
+      setDetalle('');
+      setIsFormOpen(false);
+      notify.success('Movimiento registrado');
+    } catch (error: any) {
+      notify.error('Error', error?.message || 'No se pudo registrar el movimiento');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const movimientosFiltrados = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return movimientos;
+    return movimientos.filter((mov) => {
+      const comentario = mov.descripcion?.toLowerCase() || '';
+      const metodo = mov.metodo_pago?.toLowerCase() || '';
+      const fecha = mov.fecha || '';
+      if (searchBy === 'Comentario') return comentario.includes(term);
+      if (searchBy === 'ID') return String(mov.id || '').includes(term);
+      if (searchBy === 'Detalle') return comentario.includes(term);
+      if (searchBy === 'Método') return metodo.includes(term);
+      if (searchBy === 'Fecha') return fecha.includes(term);
+      return comentario.includes(term);
+    });
+  }, [movimientos, searchTerm, searchBy]);
 
   if (isFormOpen) {
     return (
@@ -25,7 +130,7 @@ export default function MovimientosCajaPage() {
             <button onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-sm font-medium rounded border border-border text-gray-700 hover:bg-gray-50 transition-colors">
               Cancelar
             </button>
-            <button className="btn-primary text-sm px-4 py-2 rounded-md">
+            <button className="btn-primary text-sm px-4 py-2 rounded-md" onClick={handleConfirm} disabled={isLoading}>
               Confirmar
             </button>
           </div>
@@ -125,12 +230,6 @@ export default function MovimientosCajaPage() {
           onChange={(e) => setFechaDesde(e.target.value)}
           className="h-9 px-3 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
         />
-        <input
-          type="date"
-          value={fechaHasta}
-          onChange={(e) => setFechaHasta(e.target.value)}
-          className="h-9 px-3 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-        />
         <button onClick={() => setIsFormOpen(true)} className="btn-primary">
           Nuevo
         </button>
@@ -169,6 +268,8 @@ export default function MovimientosCajaPage() {
                 <option>Comentario</option>
                 <option>ID</option>
                 <option>Detalle</option>
+                <option>Método</option>
+                <option>Fecha</option>
               </select>
               <button className="h-9 w-9 rounded-md bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition-colors">
                 <Search className="h-4 w-4" />
@@ -190,11 +291,32 @@ export default function MovimientosCajaPage() {
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-border text-gray-500">
-                  <td className="px-4 py-6 text-center" colSpan={7}>
-                    No hay movimientos registrados
-                  </td>
-                </tr>
+                {movimientosFiltrados.length === 0 ? (
+                  <tr className="border-b border-border text-gray-500">
+                    <td className="px-4 py-6 text-center" colSpan={7}>
+                      No hay movimientos registrados
+                    </td>
+                  </tr>
+                ) : (
+                  movimientosFiltrados.map((mov) => {
+                    const efectivo = mov.metodo_pago === 'Efectivo' ? mov.monto : 0;
+                    const otros = mov.metodo_pago !== 'Efectivo' ? mov.monto : 0;
+                    const total = mov.tipo === 'egreso' ? -mov.monto : mov.monto;
+                    return (
+                      <tr key={mov.id} className="border-b border-border text-gray-700">
+                        <td className="px-4 py-2">{new Date(mov.fecha).toLocaleString('es-CL')}</td>
+                        <td className="px-4 py-2">{mov.id}</td>
+                        <td className="px-4 py-2">{mov.descripcion}</td>
+                        <td className="px-4 py-2">{mov.tipo}</td>
+                        <td className="px-4 py-2 text-right">${Number(efectivo).toLocaleString('es-CL')}</td>
+                        <td className="px-4 py-2 text-right">${Number(otros).toLocaleString('es-CL')}</td>
+                        <td className="px-4 py-2 text-right">
+                          {total < 0 ? '-' : ''}${Math.abs(total).toLocaleString('es-CL')}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

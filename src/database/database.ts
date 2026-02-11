@@ -24,7 +24,7 @@ export interface Cliente {
   nombre: string;
   rut: string;
   telefono: string;
-  email?: string;
+  email?: string | null;
   direccion?: string;
   fechaRegistro?: string;
   activo?: boolean;
@@ -100,6 +100,19 @@ export interface OrdenTrabajo {
   numeroCuotas?: number;
   fechaPago?: string;
   fechaProgramada?: string;
+}
+
+export interface Recordatorio {
+  id?: number;
+  clienteId?: number | null;
+  vehiculoId?: number | null;
+  tipo: string;
+  kilometraje?: number | null;
+  fechaAviso: string;
+  observaciones?: string;
+  estado: 'Pendiente' | 'Enviado';
+  fechaCreacion?: string;
+  fechaEnvio?: string | null;
 }
 
 export interface DetalleCotizacion {
@@ -193,6 +206,46 @@ export interface ComisionTecnico {
   monto_comision: number;
   fecha_calculo: string;
   mes_referencia: string;
+}
+
+export interface PagoTrabajador {
+  id?: number;
+  trabajadorId?: number;
+  trabajadorNombre: string;
+  trabajadorRut?: string;
+  concepto: string;
+  monto_efectivo: number;
+  monto_otros: number;
+  metodo_pago?: string;
+  comentario?: string;
+  fecha: string;
+  descontar_caja?: boolean;
+  caja_id?: number | null;
+}
+
+export interface Proveedor {
+  id?: number;
+  nombre: string;
+  tipoContribuyente?: string;
+  direccionFiscal?: string;
+  nombreFantasia?: string;
+  identificacionTributaria?: string;
+  ciudadFiscal?: string;
+  telefono?: string;
+  email?: string;
+  personaContacto?: string;
+  telefonoAlternativo?: string;
+  emailAlternativo?: string;
+  comentario?: string;
+  activo?: boolean;
+  fechaCreacion?: string;
+}
+
+export interface Categoria {
+  id?: number;
+  nombre: string;
+  activo?: boolean;
+  fechaCreacion?: string;
 }
 
 // Caché LRU simple para queries frecuentes
@@ -560,7 +613,7 @@ export class DatabaseService {
     paths: { dataDir: string; dbPath: string; backupDir: string },
     keyHex: string
   ): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const tempEncryptedPath = path.join(paths.dataDir, 'encrypted_temp.db');
       const backupPath = paths.dbPath + '.backup_legacy';
       
@@ -709,7 +762,7 @@ export class DatabaseService {
    * Separado del método de inicialización para mejor organización
    */
   private async createTables(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       if (!this.db) {
         reject(new Error('Base de datos no inicializada'));
         return;
@@ -762,6 +815,28 @@ export class DatabaseService {
           FOREIGN KEY (clienteId) REFERENCES clientes(id) ON DELETE CASCADE
         )
       `);
+
+      // Tabla de recordatorios
+          this.db!.run(`
+        CREATE TABLE IF NOT EXISTS recordatorios (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          clienteId INTEGER,
+          vehiculoId INTEGER,
+          tipo TEXT NOT NULL,
+          kilometraje INTEGER,
+          fechaAviso DATETIME NOT NULL,
+          observaciones TEXT,
+          estado TEXT NOT NULL DEFAULT 'Pendiente' CHECK (estado IN ('Pendiente', 'Enviado')),
+          fechaCreacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+          fechaEnvio DATETIME,
+          FOREIGN KEY (clienteId) REFERENCES clientes(id) ON DELETE SET NULL,
+          FOREIGN KEY (vehiculoId) REFERENCES vehiculos(id) ON DELETE SET NULL
+        )
+      `);
+
+          this.db!.run(
+            `CREATE INDEX IF NOT EXISTS idx_recordatorios_fecha ON recordatorios(fechaAviso)`
+          );
 
       // Tabla de servicios
           this.db!.run(`
@@ -1036,6 +1111,57 @@ export class DatabaseService {
         )
       `);
 
+      // Tabla de proveedores
+          this.db!.run(`
+        CREATE TABLE IF NOT EXISTS proveedores (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          nombre TEXT NOT NULL,
+          tipoContribuyente TEXT,
+          direccionFiscal TEXT,
+          nombreFantasia TEXT,
+          identificacionTributaria TEXT,
+          ciudadFiscal TEXT,
+          telefono TEXT,
+          email TEXT,
+          personaContacto TEXT,
+          telefonoAlternativo TEXT,
+          emailAlternativo TEXT,
+          comentario TEXT,
+          activo BOOLEAN DEFAULT 1,
+          fechaCreacion DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Tabla de categorías
+          this.db!.run(`
+        CREATE TABLE IF NOT EXISTS categorias (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          nombre TEXT NOT NULL UNIQUE,
+          activo BOOLEAN DEFAULT 1,
+          fechaCreacion DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Tabla de pagos a trabajadores
+          this.db!.run(`
+        CREATE TABLE IF NOT EXISTS pagos_trabajadores (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          trabajadorId INTEGER,
+          trabajadorNombre TEXT NOT NULL,
+          trabajadorRut TEXT,
+          concepto TEXT NOT NULL,
+          monto_efectivo INTEGER NOT NULL DEFAULT 0,
+          monto_otros INTEGER NOT NULL DEFAULT 0,
+          metodo_pago TEXT,
+          comentario TEXT,
+          fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+          descontar_caja BOOLEAN DEFAULT 0,
+          caja_id INTEGER,
+          FOREIGN KEY (trabajadorId) REFERENCES usuarios(id) ON DELETE SET NULL,
+          FOREIGN KEY (caja_id) REFERENCES estado_caja(id) ON DELETE SET NULL
+        )
+      `);
+
       // Agregar columnas a tablas existentes (migración)
           this.db!.run(`
         ALTER TABLE usuarios ADD COLUMN porcentaje_comision REAL DEFAULT 0 CHECK (porcentaje_comision >= 0 AND porcentaje_comision <= 100)
@@ -1144,6 +1270,8 @@ export class DatabaseService {
     db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_orden ON comisiones_tecnicos(ordenId)');
     db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_tecnico ON comisiones_tecnicos(tecnicoId)');
     db.run('CREATE INDEX IF NOT EXISTS idx_comisiones_mes ON comisiones_tecnicos(mes_referencia)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_pagos_trabajadores_fecha ON pagos_trabajadores(fecha)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_pagos_trabajadores_trabajador ON pagos_trabajadores(trabajadorId)');
     db.run('CREATE INDEX IF NOT EXISTS idx_ordenes_fecha_programada ON ordenes_trabajo(fechaProgramada)');
     
     console.log('✅ Índices de base de datos creados');
@@ -1244,7 +1372,7 @@ export class DatabaseService {
    * Verifica y migra el esquema de la base de datos si es necesario
    */
   private checkAndMigrateSchema(): void {
-    const CURRENT_SCHEMA_VERSION = '1.2.0'; // Versión actual del esquema
+    const CURRENT_SCHEMA_VERSION = '1.2.1'; // Versión actual del esquema
     
     // Verificar si existe la tabla de configuración (para almacenar versión)
     this.ensureDb().get("SELECT name FROM sqlite_master WHERE type='table' AND name='configuracion'", (err, row: any) => {
@@ -1710,6 +1838,145 @@ export class DatabaseService {
     });
   }
 
+  async deleteUsuario(id: number): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().run(
+        'DELETE FROM usuarios WHERE id = ?',
+        [id],
+        function(err) {
+          if (err) reject(err);
+          else resolve(this.changes > 0);
+        }
+      );
+    });
+  }
+
+  // Métodos para proveedores
+  async getAllProveedores(): Promise<Proveedor[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all('SELECT * FROM proveedores ORDER BY nombre', (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows as Proveedor[]);
+      });
+    });
+  }
+
+  async saveProveedor(proveedor: Proveedor): Promise<Proveedor> {
+    const id = proveedor.id || Date.now();
+    const proveedorToSave = { ...proveedor, id };
+
+    return new Promise((resolve, reject) => {
+      const dbServiceInstance = this;
+      this.ensureDb().run(
+        `INSERT OR REPLACE INTO proveedores 
+         (id, nombre, tipoContribuyente, direccionFiscal, nombreFantasia, identificacionTributaria, 
+          ciudadFiscal, telefono, email, personaContacto, telefonoAlternativo, emailAlternativo, 
+          comentario, activo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          proveedorToSave.nombre,
+          proveedorToSave.tipoContribuyente || null,
+          proveedorToSave.direccionFiscal || null,
+          proveedorToSave.nombreFantasia || null,
+          proveedorToSave.identificacionTributaria || null,
+          proveedorToSave.ciudadFiscal || null,
+          proveedorToSave.telefono || null,
+          proveedorToSave.email || null,
+          proveedorToSave.personaContacto || null,
+          proveedorToSave.telefonoAlternativo || null,
+          proveedorToSave.emailAlternativo || null,
+          proveedorToSave.comentario || null,
+          proveedorToSave.activo !== undefined ? proveedorToSave.activo : 1
+        ],
+        function(err) {
+          if (err) reject(err);
+          else {
+            dbServiceInstance.createAutoBackup().catch(console.error);
+            dbServiceInstance.invalidateCache();
+            resolve(proveedorToSave);
+          }
+        }
+      );
+    });
+  }
+
+  async deleteProveedor(id: number): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      const dbServiceInstance = this;
+      this.ensureDb().run(
+        'DELETE FROM proveedores WHERE id = ?',
+        [id],
+        function(err) {
+          if (err) reject(err);
+          else {
+            if (this.changes > 0) {
+              dbServiceInstance.createAutoBackup().catch(console.error);
+              dbServiceInstance.invalidateCache();
+            }
+            resolve(this.changes > 0);
+          }
+        }
+      );
+    });
+  }
+
+  // Métodos para categorías
+  async getAllCategorias(): Promise<Categoria[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all('SELECT * FROM categorias ORDER BY nombre', (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows as Categoria[]);
+      });
+    });
+  }
+
+  async saveCategoria(categoria: Categoria): Promise<Categoria> {
+    const id = categoria.id || Date.now();
+    const categoriaToSave = { ...categoria, id };
+
+    return new Promise((resolve, reject) => {
+      const dbServiceInstance = this;
+      this.ensureDb().run(
+        `INSERT OR REPLACE INTO categorias (id, nombre, activo)
+         VALUES (?, ?, ?)`,
+        [
+          id,
+          categoriaToSave.nombre,
+          categoriaToSave.activo !== undefined ? categoriaToSave.activo : 1
+        ],
+        function(err) {
+          if (err) reject(err);
+          else {
+            dbServiceInstance.createAutoBackup().catch(console.error);
+            dbServiceInstance.invalidateCache();
+            resolve(categoriaToSave);
+          }
+        }
+      );
+    });
+  }
+
+  async deleteCategoria(id: number): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      const dbServiceInstance = this;
+      this.ensureDb().run(
+        'DELETE FROM categorias WHERE id = ?',
+        [id],
+        function(err) {
+          if (err) reject(err);
+          else {
+            if (this.changes > 0) {
+              dbServiceInstance.createAutoBackup().catch(console.error);
+              dbServiceInstance.invalidateCache();
+            }
+            resolve(this.changes > 0);
+          }
+        }
+      );
+    });
+  }
+
   // Métodos para clientes
   async getAllClientes(): Promise<Cliente[]> {
     const cacheKey = 'getAllClientes';
@@ -1822,43 +2089,54 @@ export class DatabaseService {
 
   async saveCliente(cliente: Cliente): Promise<Cliente> {
     const id = cliente.id || Date.now();
-    const clienteToSave = { ...cliente, id };
+    const emailNormalizado = cliente.email?.trim() ? cliente.email.trim() : null;
+    const clienteToSave = { ...cliente, id, email: emailNormalizado };
     const db = this.ensureDb();
 
     return new Promise((resolve, reject) => {
       // Primero verificar si ya existe un cliente con el mismo RUT o email
-      db.get(
-        `SELECT id FROM clientes WHERE (rut = ? OR email = ?) AND id != ?`,
-        [clienteToSave.rut, clienteToSave.email || '', clienteToSave.id],
-        (err, existingCliente) => {
-          if (err) {
-            reject(err);
-            return;
-          }
+      const params = clienteToSave.email
+        ? [clienteToSave.rut, clienteToSave.email, clienteToSave.id]
+        : [clienteToSave.rut, clienteToSave.id];
+      const query = clienteToSave.email
+        ? `SELECT id FROM clientes WHERE (rut = ? OR email = ?) AND id != ?`
+        : `SELECT id FROM clientes WHERE rut = ? AND id != ?`;
 
-          if (existingCliente) {
-            reject(new Error('Ya existe un cliente con el mismo RUT o email'));
-            return;
-          }
-
-          // Si no existe duplicado, proceder con el guardado
-          db.run(
-            `INSERT OR REPLACE INTO clientes (id, nombre, rut, telefono, email, direccion, fechaRegistro)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [id, clienteToSave.nombre, clienteToSave.rut, clienteToSave.telefono, 
-             clienteToSave.email, clienteToSave.direccion, clienteToSave.fechaRegistro || new Date().toISOString()],
-            (err: any) => {
-              if (err) reject(err);
-              else {
-                // Crear backup automático después de guardar
-                this.createAutoBackup().catch(console.error);
-                this.invalidateCache(); // Invalidar caché después de modificar
-                resolve(clienteToSave);
-              }
-            }
-          );
+      db.get(query, params, (err, existingCliente) => {
+        if (err) {
+          reject(err);
+          return;
         }
-      );
+
+        if (existingCliente) {
+          reject(new Error('Ya existe un cliente con el mismo RUT o email'));
+          return;
+        }
+
+        // Si no existe duplicado, proceder con el guardado
+        db.run(
+          `INSERT INTO clientes (id, nombre, rut, telefono, email, direccion, fechaRegistro)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             nombre = excluded.nombre,
+             rut = excluded.rut,
+             telefono = excluded.telefono,
+             email = excluded.email,
+             direccion = excluded.direccion,
+             fechaRegistro = excluded.fechaRegistro`,
+          [id, clienteToSave.nombre, clienteToSave.rut, clienteToSave.telefono, 
+           clienteToSave.email, clienteToSave.direccion, clienteToSave.fechaRegistro || new Date().toISOString()],
+          (err: any) => {
+            if (err) reject(err);
+            else {
+              // Crear backup automático después de guardar
+              this.createAutoBackup().catch(console.error);
+              this.invalidateCache(); // Invalidar caché después de modificar
+              resolve(clienteToSave);
+            }
+          }
+        );
+      });
     });
   }
 
@@ -2072,12 +2350,13 @@ export class DatabaseService {
   }
 
   async saveVehiculo(vehiculo: Vehiculo): Promise<Vehiculo> {
-    const id = vehiculo.id || Date.now();
+    const id = vehiculo.id || 0;
     const vehiculoToSave = { ...vehiculo, id };
+    const db = this.ensureDb();
 
     return new Promise((resolve, reject) => {
       // Validar FK: cliente debe existir
-      this.ensureDb().get('SELECT COUNT(*) as c FROM clientes WHERE id = ?', [vehiculoToSave.clienteId], (chkErr: any, row: any) => {
+      db.get('SELECT COUNT(*) as c FROM clientes WHERE id = ?', [vehiculoToSave.clienteId], (chkErr: any, row: any) => {
         if (chkErr) {
           reject(chkErr);
           return;
@@ -2087,22 +2366,62 @@ export class DatabaseService {
           return;
         }
 
-      this.ensureDb().run(
-        `INSERT OR REPLACE INTO vehiculos (id, clienteId, marca, modelo, año, patente, numeroChasis, color, kilometraje, observaciones, activo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, vehiculoToSave.clienteId, vehiculoToSave.marca, vehiculoToSave.modelo, 
-         vehiculoToSave.año, vehiculoToSave.patente, vehiculoToSave.numeroChasis, vehiculoToSave.color, 
-         vehiculoToSave.kilometraje, vehiculoToSave.observaciones, vehiculoToSave.activo],
-        (err: any) => {
-          if (err) reject(err);
-          else {
-            this.createAutoBackup().catch(console.error);
-            this.invalidateCache(); // Invalidar caché después de modificar
-            resolve(vehiculoToSave);
+        // Verificar patente duplicada en otro vehículo
+        db.get(
+          'SELECT id FROM vehiculos WHERE patente = ? AND id != ?',
+          [vehiculoToSave.patente, vehiculoToSave.id || 0],
+          (dupErr: any, dupRow: any) => {
+            if (dupErr) {
+              reject(dupErr);
+              return;
+            }
+            if (dupRow) {
+              reject(new Error('Ya existe un vehículo con esa patente'));
+              return;
+            }
+
+            if (vehiculoToSave.id && vehiculoToSave.id > 0) {
+              db.run(
+                `UPDATE vehiculos
+                 SET clienteId = ?, marca = ?, modelo = ?, año = ?, patente = ?, numeroChasis = ?, color = ?, kilometraje = ?, observaciones = ?, activo = ?
+                 WHERE id = ?`,
+                [
+                  vehiculoToSave.clienteId, vehiculoToSave.marca, vehiculoToSave.modelo,
+                  vehiculoToSave.año, vehiculoToSave.patente, vehiculoToSave.numeroChasis, vehiculoToSave.color,
+                  vehiculoToSave.kilometraje, vehiculoToSave.observaciones, vehiculoToSave.activo, vehiculoToSave.id
+                ],
+                function(err: any) {
+                  if (err) {
+                    reject(err);
+                  } else if ((this as any).changes === 0) {
+                    reject(new Error(`Vehículo con ID ${vehiculoToSave.id} no existe`));
+                  } else {
+                    resolve(vehiculoToSave);
+                  }
+                }
+              );
+            } else {
+              db.run(
+                `INSERT INTO vehiculos (clienteId, marca, modelo, año, patente, numeroChasis, color, kilometraje, observaciones, activo)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  vehiculoToSave.clienteId, vehiculoToSave.marca, vehiculoToSave.modelo,
+                  vehiculoToSave.año, vehiculoToSave.patente, vehiculoToSave.numeroChasis, vehiculoToSave.color,
+                  vehiculoToSave.kilometraje, vehiculoToSave.observaciones, vehiculoToSave.activo
+                ],
+                function(err: any) {
+                  if (err) reject(err);
+                  else resolve({ ...vehiculoToSave, id: (this as any).lastID });
+                }
+              );
+            }
           }
-        }
-      );
+        );
       });
+    }).then((saved) => {
+      this.createAutoBackup().catch(console.error);
+      this.invalidateCache();
+      return saved as Vehiculo;
     });
   }
 
@@ -2308,30 +2627,8 @@ export class DatabaseService {
   }
 
   async saveRepuesto(repuesto: Repuesto): Promise<Repuesto> {
-    const id = repuesto.id || Date.now();
-    // Si stockMinimo es 0 o null, usar 5 como valor por defecto
-    const stockMinimoFinal = repuesto.stockMinimo && repuesto.stockMinimo > 0 ? repuesto.stockMinimo : 5;
-    const repuestoToSave = { ...repuesto, id, stockMinimo: stockMinimoFinal };
-
-    return new Promise((resolve, reject) => {
-      const dbServiceInstance = this;
-      this.ensureDb().run(
-        `INSERT OR REPLACE INTO repuestos (id, codigo, nombre, descripcion, precio, precioCosto, stock, stockMinimo, categoria, marca, ubicacion, activo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, repuestoToSave.codigo, repuestoToSave.nombre, repuestoToSave.descripcion, 
-         repuestoToSave.precio, repuestoToSave.precioCosto || 0, repuestoToSave.stock, stockMinimoFinal, 
-         repuestoToSave.categoria, repuestoToSave.marca, repuestoToSave.ubicacion, repuestoToSave.activo],
-        function(err) {
-          if (err) reject(err);
-          else {
-            // Crear backup automático después de guardar repuesto
-            dbServiceInstance.createAutoBackup().catch(console.error);
-            dbServiceInstance.invalidateCache(); // Invalidar caché después de modificar
-            resolve(repuestoToSave);
-          }
-        }
-      );
-    });
+    const [saved] = await this.saveRepuestosBatch([repuesto]);
+    return saved;
   }
 
   async deleteRepuesto(id: number): Promise<boolean> {
@@ -2819,6 +3116,15 @@ export class DatabaseService {
   async getDetallesOrden(ordenId: number): Promise<DetalleOrden[]> {
     return new Promise((resolve, reject) => {
       this.ensureDb().all('SELECT * FROM detalles_orden WHERE ordenId = ?', [ordenId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows as DetalleOrden[]);
+      });
+    });
+  }
+
+  async getAllDetallesOrden(): Promise<DetalleOrden[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all('SELECT * FROM detalles_orden', (err, rows) => {
         if (err) reject(err);
         else resolve(rows as DetalleOrden[]);
       });
@@ -3410,10 +3716,12 @@ export class DatabaseService {
     clienteEmail?: string;
     repuestos: Array<{ id: number; nombre: string; precio: number; cantidad: number; subtotal: number }>;
     total: number;
+    metodoPago?: 'Efectivo' | 'Débito' | 'Crédito';
+    fecha?: string;
   }): Promise<Venta> {
     const ventaId = Date.now();
     const numeroVenta = this.generarNumeroVenta();
-    const fecha = new Date().toISOString();
+    const fecha = ventaData.fecha || new Date().toISOString();
 
     return new Promise((resolve, reject) => {
       const db = this.ensureDb();
@@ -3450,7 +3758,7 @@ export class DatabaseService {
               ventaData.clienteEmail || null,
               fecha,
               ventaData.total,
-              'Efectivo' // Por defecto efectivo para ventas rápidas
+              ventaData.metodoPago || 'Efectivo'
             ],
             function(err: any) {
               if (err) rej(err);
@@ -3543,7 +3851,7 @@ export class DatabaseService {
             clienteEmail: ventaData.clienteEmail,
             fecha,
             total: ventaData.total,
-            metodoPago: 'Efectivo'
+            metodoPago: ventaData.metodoPago || 'Efectivo'
           };
           resolve(venta);
         })
@@ -3552,6 +3860,36 @@ export class DatabaseService {
           await rollback();
           reject(txErr);
         });
+    });
+  }
+
+  async getAllVentas(): Promise<Venta[]> {
+    const cacheKey = 'getAllVentas';
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        'SELECT * FROM ventas ORDER BY fecha DESC',
+        (err, rows) => {
+          if (err) reject(err);
+          else {
+            this.queryCache.set(cacheKey, rows as Venta[]);
+            resolve(rows as Venta[]);
+          }
+        }
+      );
+    });
+  }
+
+  async getAllDetallesVenta(): Promise<DetalleVenta[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all('SELECT * FROM detalles_venta', (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows as DetalleVenta[]);
+      });
     });
   }
 
@@ -3746,49 +4084,209 @@ export class DatabaseService {
     const commit = () => new Promise<void>((res, rej) => db.run('COMMIT', (e) => e ? rej(e) : res()));
     const rollback = () => new Promise<void>((res) => db.run('ROLLBACK', () => res()));
 
-    const clienteToSave: Cliente = { ...cliente, id: cliente.id || Date.now() };
-
     try {
       await begin();
-      // Guardar cliente
-      await new Promise<void>((resolve, reject) => {
-        db.run(
-          `INSERT OR REPLACE INTO clientes (id, nombre, rut, telefono, email, direccion, fechaRegistro)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [clienteToSave.id, clienteToSave.nombre, clienteToSave.rut, clienteToSave.telefono,
-           clienteToSave.email, clienteToSave.direccion, clienteToSave.fechaRegistro || new Date().toISOString()],
-          (err: any) => err ? reject(err) : resolve()
-        );
+      const emailNormalizado = cliente.email?.trim() ? cliente.email.trim() : null;
+      const clienteId = cliente.id || 0;
+      const existingCliente = await new Promise<{ id: number } | undefined>((resolve, reject) => {
+        const params = emailNormalizado
+          ? [cliente.rut, emailNormalizado, clienteId]
+          : [cliente.rut, clienteId];
+        const query = emailNormalizado
+          ? `SELECT id FROM clientes WHERE (rut = ? OR email = ?) AND id != ?`
+          : `SELECT id FROM clientes WHERE rut = ? AND id != ?`;
+        db.get(query, params, (err, row) => err ? reject(err) : resolve(row as any));
       });
+
+      if (existingCliente) {
+        throw new Error('Ya existe un cliente con el mismo RUT o email');
+      }
+
+      let savedClienteId = clienteId;
+      const fechaRegistro = cliente.fechaRegistro || new Date().toISOString();
+
+      if (clienteId > 0) {
+        await new Promise<void>((resolve, reject) => {
+          db.run(
+            `UPDATE clientes
+             SET nombre = ?, rut = ?, telefono = ?, email = ?, direccion = ?, fechaRegistro = ?
+             WHERE id = ?`,
+            [cliente.nombre, cliente.rut, cliente.telefono, emailNormalizado, cliente.direccion, fechaRegistro, clienteId],
+            function(err: any) {
+              if (err) {
+                reject(err);
+              } else if ((this as any).changes === 0) {
+                reject(new Error(`Cliente con ID ${clienteId} no existe`));
+              } else {
+                resolve();
+              }
+            }
+          );
+        });
+      } else {
+        savedClienteId = await new Promise<number>((resolve, reject) => {
+          db.run(
+            `INSERT INTO clientes (nombre, rut, telefono, email, direccion, fechaRegistro)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [cliente.nombre, cliente.rut, cliente.telefono, emailNormalizado, cliente.direccion, fechaRegistro],
+            function(err: any) {
+              if (err) reject(err);
+              else resolve((this as any).lastID);
+            }
+          );
+        });
+      }
 
       // Guardar vehículos
       for (const v of vehiculos) {
         if (!v.marca || !v.modelo || !v.patente) { continue; }
-        const vehiculoToSave: Vehiculo = { ...v, id: v.id || Date.now(), clienteId: clienteToSave.id as number } as any;
-        await new Promise<void>((resolve, reject) => {
-          db.run(
-            `INSERT OR REPLACE INTO vehiculos (id, clienteId, marca, modelo, año, patente, color, kilometraje, observaciones, activo)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [vehiculoToSave.id, vehiculoToSave.clienteId, vehiculoToSave.marca, vehiculoToSave.modelo, vehiculoToSave.año,
-             vehiculoToSave.patente, vehiculoToSave.color, vehiculoToSave.kilometraje, vehiculoToSave.observaciones, vehiculoToSave.activo],
-            (err: any) => err ? reject(err) : resolve()
-          );
-        });
+        if (v.id) {
+          await new Promise<void>((resolve, reject) => {
+            db.run(
+              `UPDATE vehiculos
+               SET clienteId = ?, marca = ?, modelo = ?, año = ?, patente = ?, color = ?, kilometraje = ?, observaciones = ?, activo = ?
+               WHERE id = ?`,
+              [savedClienteId, v.marca, v.modelo, v.año, v.patente, v.color, v.kilometraje, v.observaciones, v.activo, v.id],
+              function(err: any) {
+                if (err) {
+                  reject(err);
+                } else if ((this as any).changes === 0) {
+                  reject(new Error(`Vehículo con ID ${v.id} no existe`));
+                } else {
+                  resolve();
+                }
+              }
+            );
+          });
+        } else {
+          await new Promise<void>((resolve, reject) => {
+            db.run(
+              `INSERT INTO vehiculos (clienteId, marca, modelo, año, patente, color, kilometraje, observaciones, activo)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [savedClienteId, v.marca, v.modelo, v.año, v.patente, v.color, v.kilometraje, v.observaciones, v.activo],
+              (err: any) => err ? reject(err) : resolve()
+            );
+          });
+        }
       }
 
       await commit();
       // backup opcional
       await this.createAutoBackup().catch(() => {});
       this.invalidateCache(); // Invalidar caché después de modificar
-      return clienteToSave;
+      return { ...cliente, id: savedClienteId, fechaRegistro };
     } catch (e) {
       await rollback();
       throw e;
     }
   }
+
+  async saveRepuestosBatch(repuestos: Repuesto[]): Promise<Repuesto[]> {
+    const db = this.ensureDb();
+    const begin = () => new Promise<void>((res, rej) => db.run('BEGIN TRANSACTION', (e) => e ? rej(e) : res()));
+    const commit = () => new Promise<void>((res, rej) => db.run('COMMIT', (e) => e ? rej(e) : res()));
+    const rollback = () => new Promise<void>((res) => db.run('ROLLBACK', () => res()));
+
+    if (!repuestos.length) return [];
+
+    try {
+      await begin();
+      const saved: Repuesto[] = [];
+
+      for (const repuesto of repuestos) {
+        const id = repuesto.id || 0;
+        const stockMinimoFinal = repuesto.stockMinimo && repuesto.stockMinimo > 0 ? repuesto.stockMinimo : 5;
+        const repuestoToSave = { ...repuesto, stockMinimo: stockMinimoFinal };
+
+        const existing = await new Promise<{ id: number } | undefined>((resolve, reject) => {
+          db.get(
+            `SELECT id FROM repuestos WHERE codigo = ? AND id != ?`,
+            [repuestoToSave.codigo, id || 0],
+            (err, row) => err ? reject(err) : resolve(row as any)
+          );
+        });
+
+        if (existing) {
+          throw new Error(`Ya existe un repuesto con el código ${repuestoToSave.codigo}`);
+        }
+
+        if (id > 0) {
+          await new Promise<void>((resolve, reject) => {
+            db.run(
+              `UPDATE repuestos
+               SET codigo = ?, nombre = ?, descripcion = ?, precio = ?, precioCosto = ?, stock = ?, stockMinimo = ?, categoria = ?, marca = ?, ubicacion = ?, activo = ?
+               WHERE id = ?`,
+              [
+                repuestoToSave.codigo, repuestoToSave.nombre, repuestoToSave.descripcion,
+                repuestoToSave.precio, repuestoToSave.precioCosto || 0, repuestoToSave.stock, stockMinimoFinal,
+                repuestoToSave.categoria, repuestoToSave.marca, repuestoToSave.ubicacion, repuestoToSave.activo, id
+              ],
+              function(err: any) {
+                if (err) {
+                  reject(err);
+                } else if ((this as any).changes === 0) {
+                  reject(new Error(`Repuesto con ID ${id} no existe`));
+                } else {
+                  resolve();
+                }
+              }
+            );
+          });
+          saved.push({ ...repuestoToSave, id });
+        } else {
+          const newId = await new Promise<number>((resolve, reject) => {
+            db.run(
+              `INSERT INTO repuestos (codigo, nombre, descripcion, precio, precioCosto, stock, stockMinimo, categoria, marca, ubicacion, activo)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                repuestoToSave.codigo, repuestoToSave.nombre, repuestoToSave.descripcion,
+                repuestoToSave.precio, repuestoToSave.precioCosto || 0, repuestoToSave.stock, stockMinimoFinal,
+                repuestoToSave.categoria, repuestoToSave.marca, repuestoToSave.ubicacion, repuestoToSave.activo
+              ],
+              function(err: any) {
+                if (err) reject(err);
+                else resolve((this as any).lastID);
+              }
+            );
+          });
+          saved.push({ ...repuestoToSave, id: newId });
+        }
+      }
+
+      await commit();
+      this.createAutoBackup().catch(console.error);
+      this.invalidateCache();
+      return saved;
+    } catch (error) {
+      await rollback();
+      throw error;
+    }
+  }
+
+  async deleteRepuestosByIds(ids: number[]): Promise<number> {
+    if (!ids.length) return 0;
+    const db = this.ensureDb();
+    const placeholders = ids.map(() => '?').join(',');
+    return new Promise<number>((resolve, reject) => {
+      db.run(
+        `DELETE FROM repuestos WHERE id IN (${placeholders})`,
+        ids,
+        function(err: any) {
+          if (err) reject(err);
+          else resolve((this as any).changes || 0);
+        }
+      );
+    }).then((deletedCount) => {
+      if (deletedCount > 0) {
+        this.createAutoBackup().catch(console.error);
+        this.invalidateCache();
+      }
+      return deletedCount;
+    });
+  }
   // Método para obtener estadísticas de inventario
   async getEstadisticasInventario(): Promise<any> {
-    return new Promise((resolve, reject) => {
+    return new Promise<any>((resolve, reject) => {
       const db = this.ensureDb();
       db.get('SELECT COUNT(*) as total, SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END) as conStock, SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END) as sinStock FROM repuestos', (err, stats: any) => {
         if (err) {
@@ -3815,7 +4313,7 @@ export class DatabaseService {
 
   // Funciones helper para validación de integridad referencial
   async validateForeignKey(table: string, id: number, fieldName: string): Promise<boolean> {
-    return new Promise((resolve, reject) => {
+    return new Promise<boolean>((resolve, reject) => {
       const db = this.ensureDb();
       db.get(`SELECT COUNT(*) as count FROM ${table} WHERE id = ?`, [id], (err, row: any) => {
         if (err) {
@@ -3845,7 +4343,7 @@ export class DatabaseService {
 
   // Métodos para configuración
   async getAllConfiguracion(): Promise<any[]> {
-    return new Promise((resolve, reject) => {
+    return new Promise<any[]>((resolve, reject) => {
       const db = this.ensureDb();
       db.all('SELECT * FROM configuracion ORDER BY clave', (err, rows) => {
         if (err) reject(err);
@@ -3858,7 +4356,7 @@ export class DatabaseService {
     const id = config.id || Date.now();
     const configToSave = { ...config, id };
 
-    return new Promise((resolve, reject) => {
+    return new Promise<any>((resolve, reject) => {
       const dbServiceInstance = this;
       const db = this.ensureDb();
       db.run(
@@ -3879,7 +4377,7 @@ export class DatabaseService {
 
   // Métodos para importación de repuestos
   async importarRepuestosDesdeJSON(repuestos: any[]): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const db = this.ensureDb();
       const stmt = db.prepare(`
         INSERT OR REPLACE INTO repuestos (codigo, nombre, descripcion, precio, precioCosto, stock, stockMinimo, categoria, marca, ubicacion, activo)
@@ -4561,6 +5059,49 @@ export class DatabaseService {
   }
 
   /**
+   * Obtiene todos los movimientos de caja
+   */
+  async getAllMovimientosCaja(): Promise<MovimientoCaja[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        `SELECT * FROM movimientos_caja ORDER BY fecha DESC`,
+        (err, rows: any[]) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
+
+  /**
+   * Obtiene todos los cierres de caja
+   */
+  async getAllCierresCaja(fechaDesde?: string, fechaHasta?: string): Promise<EstadoCaja[]> {
+    return new Promise((resolve, reject) => {
+      let query = "SELECT * FROM estado_caja WHERE estado = 'cerrada'";
+      const params: any[] = [];
+
+      if (fechaDesde && fechaHasta) {
+        query += " AND DATE(fecha_cierre) BETWEEN DATE(?) AND DATE(?)";
+        params.push(fechaDesde, fechaHasta);
+      } else if (fechaDesde) {
+        query += " AND DATE(fecha_cierre) >= DATE(?)";
+        params.push(fechaDesde);
+      } else if (fechaHasta) {
+        query += " AND DATE(fecha_cierre) <= DATE(?)";
+        params.push(fechaHasta);
+      }
+
+      query += " ORDER BY fecha_cierre DESC";
+
+      this.ensureDb().all(query, params, (err, rows: any[]) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+  }
+
+  /**
    * Obtiene el arqueo del día (totales por método de pago)
    */
   async getArqueoCaja(fecha: string): Promise<{
@@ -4738,6 +5279,64 @@ export class DatabaseService {
     });
   }
 
+  /**
+   * Guarda un pago a trabajador
+   */
+  async savePagoTrabajador(pago: PagoTrabajador): Promise<PagoTrabajador> {
+    const id = pago.id || Date.now();
+    const pagoToSave = { ...pago, id };
+
+    return new Promise((resolve, reject) => {
+      this.ensureDb().run(
+        `INSERT OR REPLACE INTO pagos_trabajadores 
+         (id, trabajadorId, trabajadorNombre, trabajadorRut, concepto, monto_efectivo, monto_otros, metodo_pago, comentario, fecha, descontar_caja, caja_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          pagoToSave.trabajadorId || null,
+          pagoToSave.trabajadorNombre,
+          pagoToSave.trabajadorRut || null,
+          pagoToSave.concepto,
+          pagoToSave.monto_efectivo || 0,
+          pagoToSave.monto_otros || 0,
+          pagoToSave.metodo_pago || null,
+          pagoToSave.comentario || null,
+          pagoToSave.fecha || new Date().toISOString(),
+          pagoToSave.descontar_caja ? 1 : 0,
+          pagoToSave.caja_id || null
+        ],
+        function(err) {
+          if (err) reject(err);
+          else resolve(pagoToSave);
+        }
+      );
+    });
+  }
+
+  async getAllPagosTrabajadores(): Promise<PagoTrabajador[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all('SELECT * FROM pagos_trabajadores ORDER BY fecha DESC', (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows as PagoTrabajador[]);
+      });
+    });
+  }
+
+  async getPagosTrabajadoresPorFecha(fecha: string): Promise<PagoTrabajador[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        `SELECT * FROM pagos_trabajadores 
+         WHERE DATE(fecha) = DATE(?) 
+         ORDER BY fecha DESC`,
+        [fecha],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows as PagoTrabajador[]);
+        }
+      );
+    });
+  }
+
   // ========== MÓDULO DE AGENDA ==========
 
   /**
@@ -4786,6 +5385,145 @@ export class DatabaseService {
         (err, rows: any[]) => {
           if (err) reject(err);
           else resolve(rows || []);
+        }
+      );
+    });
+  }
+
+  // ========== MÓDULO DE RECORDATORIOS ==========
+
+  async getAllRecordatorios(): Promise<Recordatorio[]> {
+    return new Promise((resolve, reject) => {
+      this.ensureDb().all(
+        `SELECT * FROM recordatorios ORDER BY fechaAviso ASC`,
+        [],
+        (err, rows: any[]) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
+
+  async saveRecordatorio(recordatorio: Recordatorio): Promise<Recordatorio> {
+    const db = this.ensureDb();
+    const estado = recordatorio.estado || 'Pendiente';
+    const fechaEnvio = estado === 'Enviado'
+      ? (recordatorio.fechaEnvio || new Date().toISOString())
+      : null;
+    const clienteId = recordatorio.clienteId ?? null;
+    const vehiculoId = recordatorio.vehiculoId ?? null;
+
+    if (recordatorio.id && recordatorio.id > 0) {
+      return new Promise<Recordatorio>((resolve, reject) => {
+        db.run(
+          `UPDATE recordatorios
+           SET clienteId = ?, vehiculoId = ?, tipo = ?, kilometraje = ?, fechaAviso = ?, observaciones = ?, estado = ?, fechaEnvio = ?
+           WHERE id = ?`,
+          [
+            clienteId,
+            vehiculoId,
+            recordatorio.tipo,
+            recordatorio.kilometraje ?? null,
+            recordatorio.fechaAviso,
+            recordatorio.observaciones || '',
+            estado,
+            fechaEnvio,
+            recordatorio.id
+          ],
+          (err: any) => {
+            if (err) reject(err);
+            else {
+              this.createAutoBackup().catch(console.error);
+              this.invalidateCache();
+              resolve({
+                ...recordatorio,
+                estado,
+                fechaEnvio
+              });
+            }
+          }
+        );
+      });
+    }
+
+    return new Promise<Recordatorio>((resolve, reject) => {
+      db.run(
+        `INSERT INTO recordatorios (clienteId, vehiculoId, tipo, kilometraje, fechaAviso, observaciones, estado, fechaEnvio)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          clienteId,
+          vehiculoId,
+          recordatorio.tipo,
+          recordatorio.kilometraje ?? null,
+          recordatorio.fechaAviso,
+          recordatorio.observaciones || '',
+          estado,
+          fechaEnvio
+        ],
+        function(err: any) {
+          if (err) reject(err);
+          else {
+            const saved: Recordatorio = {
+              ...recordatorio,
+              id: (this as any).lastID,
+              estado,
+              fechaEnvio
+            };
+            resolve(saved);
+          }
+        }
+      );
+    }).then((saved) => {
+      this.createAutoBackup().catch(console.error);
+      this.invalidateCache();
+      return saved;
+    });
+  }
+
+  async deleteRecordatorio(id: number): Promise<boolean> {
+    return new Promise<boolean>((resolve, reject) => {
+      this.ensureDb().run(
+        `DELETE FROM recordatorios WHERE id = ?`,
+        [id],
+        function(err: any) {
+          if (err) reject(err);
+          else resolve((this as any).changes > 0);
+        }
+      );
+    }).then((result) => {
+      if (result) {
+        this.createAutoBackup().catch(console.error);
+        this.invalidateCache();
+      }
+      return result;
+    });
+  }
+
+  async updateRecordatorioEstado(id: number, estado: 'Pendiente' | 'Enviado'): Promise<Recordatorio> {
+    const fechaEnvio = estado === 'Enviado' ? new Date().toISOString() : null;
+    return new Promise((resolve, reject) => {
+      const db = this.ensureDb();
+      db.run(
+        `UPDATE recordatorios SET estado = ?, fechaEnvio = ? WHERE id = ?`,
+        [estado, fechaEnvio, id],
+        (err: any) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          db.get(
+            `SELECT * FROM recordatorios WHERE id = ?`,
+            [id],
+            (err2: any, row: any) => {
+              if (err2) reject(err2);
+              else {
+                this.createAutoBackup().catch(console.error);
+                this.invalidateCache();
+                resolve(row);
+              }
+            }
+          );
         }
       );
     });

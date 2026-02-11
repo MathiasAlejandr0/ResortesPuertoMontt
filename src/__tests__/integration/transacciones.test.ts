@@ -6,9 +6,11 @@ import { DatabaseService, Cliente, Vehiculo, Cotizacion, OrdenTrabajo, DetalleCo
 import * as fs from 'fs';
 import * as path from 'path';
 
+const testDataDir = path.join(__dirname, '../../../../test-data/integration-transacciones');
+
 jest.mock('electron', () => ({
   app: {
-    getPath: jest.fn(() => path.join(__dirname, '../../../../test-data'))
+    getPath: jest.fn(() => testDataDir)
   }
 }));
 
@@ -17,8 +19,8 @@ process.env.NODE_ENV = 'development';
 
 describe('Tests de Integración - Transacciones', () => {
   let dbService: DatabaseService;
-  const testDataDir = path.join(__dirname, '../../../../test-data');
-  const testDbPath = path.join(testDataDir, 'resortes-integration.db');
+  const testDataDir = path.join(__dirname, '../../../../test-data/integration-transacciones');
+  const testDbPath = path.join(testDataDir, 'data', 'resortes.db');
 
   beforeAll(async () => {
     if (!fs.existsSync(testDataDir)) {
@@ -100,10 +102,15 @@ describe('Tests de Integración - Transacciones', () => {
 
   describe('saveCotizacionConDetalles - Transacción Atómica', () => {
     it('debe guardar cotización con detalles en una sola transacción', async () => {
+      const baseTimestamp = Date.now();
+      const rutBase = baseTimestamp;
+      const dv = rutBase % 11;
+      const dvFinal = dv === 0 ? '0' : dv === 1 ? 'K' : String(11 - dv);
+      const patente = `INT-${baseTimestamp}`;
       // Crear cliente y vehículo primero
       const cliente: Cliente = {
         nombre: 'Cliente Test Integración',
-        rut: '12345678-9',
+        rut: `${rutBase}-${dvFinal}`,
         telefono: '+56912345678',
         activo: true,
       };
@@ -115,7 +122,7 @@ describe('Tests de Integración - Transacciones', () => {
         marca: 'Toyota',
         modelo: 'Corolla',
         año: 2020,
-        patente: 'TEST01',
+        patente,
         activo: true,
       };
       const vehiculoGuardado = await dbService.saveVehiculo(vehiculo);
@@ -127,16 +134,37 @@ describe('Tests de Integración - Transacciones', () => {
         clienteId: clienteGuardado.id!,
         vehiculoId: vehiculoGuardado.id!,
         fecha: new Date().toISOString(),
+        validaHasta: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         estado: 'pendiente',
         descripcion: 'Reparación completa',
         total: 150000,
       };
 
+      const servicio = await dbService.saveServicio({
+        nombre: `Servicio ${baseTimestamp}`,
+        descripcion: 'Servicio test',
+        precio: 50000,
+        duracionEstimada: 60,
+        activo: true
+      });
+      const repuesto = await dbService.saveRepuesto({
+        codigo: `REP-INT-${baseTimestamp}`,
+        nombre: 'Repuesto Test',
+        descripcion: 'Repuesto test',
+        precio: 50000,
+        stock: 10,
+        stockMinimo: 5,
+        categoria: 'Test',
+        marca: 'Test',
+        ubicacion: 'A1',
+        activo: true
+      });
+
       const detalles: DetalleCotizacion[] = [
         {
           cotizacionId: 0, // Se actualizará después
           tipo: 'servicio',
-          servicioId: 1,
+          servicioId: servicio.id,
           cantidad: 2,
           precio: 50000,
           subtotal: 100000,
@@ -145,7 +173,7 @@ describe('Tests de Integración - Transacciones', () => {
         {
           cotizacionId: 0,
           tipo: 'repuesto',
-          repuestoId: 1,
+          repuestoId: repuesto.id,
           cantidad: 1,
           precio: 50000,
           subtotal: 50000,
@@ -192,10 +220,15 @@ describe('Tests de Integración - Transacciones', () => {
 
   describe('saveOrdenTrabajoConDetalles - Transacción Atómica', () => {
     it('debe guardar orden con detalles en una sola transacción', async () => {
+      const baseTimestamp = Date.now() + 10000;
+      const rutBase = baseTimestamp;
+      const dv = rutBase % 11;
+      const dvFinal = dv === 0 ? '0' : dv === 1 ? 'K' : String(11 - dv);
+      const patente = `ORD-${baseTimestamp}`;
       // Crear cliente y vehículo
       const cliente: Cliente = {
         nombre: 'Cliente Test Orden',
-        rut: '87654321-0',
+        rut: `${rutBase}-${dvFinal}`,
         telefono: '+56987654321',
         activo: true,
       };
@@ -206,7 +239,7 @@ describe('Tests de Integración - Transacciones', () => {
         marca: 'Honda',
         modelo: 'Civic',
         año: 2021,
-        patente: 'TEST02',
+        patente,
         activo: true,
       };
       const vehiculoGuardado = await dbService.saveVehiculo(vehiculo);
@@ -222,11 +255,31 @@ describe('Tests de Integración - Transacciones', () => {
         total: 200000,
       };
 
+      const servicio = await dbService.saveServicio({
+        nombre: `Servicio Orden ${baseTimestamp}`,
+        descripcion: 'Servicio test',
+        precio: 150000,
+        duracionEstimada: 60,
+        activo: true
+      });
+      const repuesto = await dbService.saveRepuesto({
+        codigo: `REP-ORD-${baseTimestamp}`,
+        nombre: 'Repuesto Orden',
+        descripcion: 'Repuesto test',
+        precio: 25000,
+        stock: 10,
+        stockMinimo: 5,
+        categoria: 'Test',
+        marca: 'Test',
+        ubicacion: 'A1',
+        activo: true
+      });
+
       const detalles: DetalleOrden[] = [
         {
           ordenId: 0,
           tipo: 'servicio',
-          servicioId: 1,
+          servicioId: servicio.id,
           cantidad: 1,
           precio: 150000,
           subtotal: 150000,
@@ -235,7 +288,7 @@ describe('Tests de Integración - Transacciones', () => {
         {
           ordenId: 0,
           tipo: 'repuesto',
-          repuestoId: 1,
+          repuestoId: repuesto.id,
           cantidad: 2,
           precio: 25000,
           subtotal: 50000,
@@ -277,9 +330,13 @@ describe('Tests de Integración - Transacciones', () => {
 
   describe('saveClienteConVehiculos - Transacción Atómica', () => {
     it('debe guardar cliente con múltiples vehículos en una transacción', async () => {
+      const baseTimestamp = Date.now() + 20000;
+      const rutBase = baseTimestamp;
+      const dv = rutBase % 11;
+      const dvFinal = dv === 0 ? '0' : dv === 1 ? 'K' : String(11 - dv);
       const cliente: Cliente = {
         nombre: 'Cliente Múltiples Vehículos',
-        rut: '11111111-1',
+        rut: `${rutBase}-${dvFinal}`,
         telefono: '+56911111111',
         activo: true,
       };
@@ -290,7 +347,7 @@ describe('Tests de Integración - Transacciones', () => {
           marca: 'Toyota',
           modelo: 'Corolla',
           año: 2020,
-          patente: 'VH1',
+          patente: `VH-${baseTimestamp}-1`,
           activo: true,
         },
         {
@@ -298,7 +355,7 @@ describe('Tests de Integración - Transacciones', () => {
           marca: 'Honda',
           modelo: 'Civic',
           año: 2021,
-          patente: 'VH2',
+          patente: `VH-${baseTimestamp}-2`,
           activo: true,
         },
       ];

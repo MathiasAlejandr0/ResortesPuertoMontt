@@ -100,9 +100,12 @@ export function generarDatosVentasUltimosMeses(
 export function estaCotizacionVencida(validaHasta: string): boolean {
   if (!validaHasta) return false;
   const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0); // Normalizar a medianoche
-  const vencimiento = new Date(validaHasta);
-  vencimiento.setHours(0, 0, 0, 0); // Normalizar a medianoche
-  return vencimiento < hoy; // Solo vencida si la fecha es anterior (no igual)
+  const hoyLocal = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  const partes = validaHasta.split('-').map(Number);
+  const vencimiento = partes.length === 3
+    ? new Date(partes[0], partes[1] - 1, partes[2])
+    : new Date(validaHasta);
+  vencimiento.setHours(0, 0, 0, 0);
+  return vencimiento < hoyLocal; // Solo vencida si la fecha es anterior (no igual)
 }
 

@@ -179,7 +179,7 @@ export default function CajaDiariaPage() {
                     CERRAR CAJA
                   </button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="max-w-md bg-white text-gray-900">
                   <DialogHeader>
                     <DialogTitle>Cerrar Caja</DialogTitle>
                   </DialogHeader>
@@ -216,7 +216,7 @@ export default function CajaDiariaPage() {
                     CERRAR CAJA
                   </button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="max-w-md bg-white text-gray-900">
                   <DialogHeader>
                     <DialogTitle>Cerrar Caja</DialogTitle>
                   </DialogHeader>
@@ -281,7 +281,7 @@ export default function CajaDiariaPage() {
           <div className="rounded-md border border-gray-200 bg-muted/40 p-4 text-sm text-gray-700">
             <p className="font-medium mb-2">Información</p>
             <p>
-              Para una correcta y sencilla administración de caja, sólo se verán reflejados los
+              Para una correcta y sencilla administración de caja, solo se verán reflejados los
               movimientos que representan un ingreso o egreso de capital, sea en "efectivo" u "otros".
               Los cobros realizados en las ventas y órdenes de servicios que sean a cuenta corriente
               quedarán asignados a la cuenta corriente correspondiente como deuda y recién se verán

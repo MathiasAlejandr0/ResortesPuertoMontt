@@ -117,8 +117,8 @@ export default function ClienteVehiculosModal({ cliente, vehiculos, isOpen, onCl
                      onChange={e => handleChange(idx, 'marca', e.target.value)} />
               <input className="col-span-1 border rounded px-2 py-1" placeholder="Modelo" value={v.modelo}
                      onChange={e => handleChange(idx, 'modelo', e.target.value)} />
-              <input className="col-span-1 border rounded px-2 py-1" placeholder="Año" type="number" value={v.año}
-                     onChange={e => handleChange(idx, 'año', Number(e.target.value))} />
+              <input className="col-span-1 border rounded px-2 py-1" placeholder="Año" type="number" value={v.año === 0 ? '' : v.año}
+                     onChange={e => handleChange(idx, 'año', e.target.value === '' ? 0 : Number(e.target.value))} />
               <input className="col-span-1 border rounded px-2 py-1" placeholder="Patente" value={v.patente}
                      onChange={e => handleChange(idx, 'patente', e.target.value)} />
               <input className="col-span-1 border rounded px-2 py-1" placeholder="Color" value={v.color || ''}

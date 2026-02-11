@@ -34,3 +34,11 @@ global.window.open = jest.fn();
 // Mock de window.confirm
 global.window.confirm = jest.fn(() => true);
 
+// Mock de ResizeObserver (usado por Recharts)
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+(global as any).ResizeObserver = MockResizeObserver;

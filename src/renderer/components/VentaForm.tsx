@@ -3,6 +3,7 @@ import { X, Plus, Search, ShoppingCart, CreditCard, DollarSign } from 'lucide-re
 import { useApp } from '../contexts/AppContext';
 import { notify, Logger, formatearRUT, Validation } from '../utils/cn';
 import { Repuesto, Cliente, OrdenTrabajo, Vehiculo } from '../types';
+import { useAutoSave } from '../hooks/useAutoSave';
 
 interface RepuestoVenta {
   id: number;
@@ -40,6 +41,58 @@ export default function VentaForm({ isOpen, onClose, onSave }: VentaFormProps) {
 
   const inputBusquedaRepuestoRef = useRef<HTMLInputElement>(null);
   const inputPrecioFinalRef = useRef<HTMLInputElement>(null);
+
+  // Objeto con todos los datos del formulario para auto-guardar
+  const formData = useMemo(() => ({
+    busquedaRepuesto,
+    repuestosSeleccionados,
+    precioFinal,
+    clienteNombre,
+    clienteRut,
+    clienteTelefono,
+    clienteEmail,
+    buscarClienteExistente,
+    clienteSeleccionado: clienteSeleccionado ? { id: clienteSeleccionado.id, nombre: clienteSeleccionado.nombre } : null,
+    metodoPago,
+    numeroCuotas,
+    fechasPago
+  }), [
+    busquedaRepuesto, repuestosSeleccionados, precioFinal,
+    clienteNombre, clienteRut, clienteTelefono, clienteEmail,
+    buscarClienteExistente, clienteSeleccionado, metodoPago,
+    numeroCuotas, fechasPago
+  ]);
+
+  // Hook de auto-guardado
+  const { restore, clear } = useAutoSave({
+    key: 'venta',
+    data: formData,
+    enabled: isOpen,
+    onRestore: (restored: any) => {
+      if (restored) {
+        Logger.log('📂 Restaurando datos del formulario de venta:', restored);
+        if (restored.busquedaRepuesto) setBusquedaRepuesto(restored.busquedaRepuesto);
+        if (restored.repuestosSeleccionados) setRepuestosSeleccionados(restored.repuestosSeleccionados);
+        if (restored.precioFinal) setPrecioFinal(restored.precioFinal);
+        if (restored.clienteNombre) setClienteNombre(restored.clienteNombre);
+        if (restored.clienteRut) setClienteRut(restored.clienteRut);
+        if (restored.clienteTelefono) setClienteTelefono(restored.clienteTelefono);
+        if (restored.clienteEmail) setClienteEmail(restored.clienteEmail);
+        if (restored.buscarClienteExistente) setBuscarClienteExistente(restored.buscarClienteExistente);
+        if (restored.metodoPago) setMetodoPago(restored.metodoPago);
+        if (restored.numeroCuotas !== undefined) setNumeroCuotas(restored.numeroCuotas);
+        if (restored.fechasPago) setFechasPago(restored.fechasPago);
+        
+        // Restaurar cliente seleccionado si existe
+        if (restored.clienteSeleccionado?.id) {
+          const cliente = clientes.find(c => c.id === restored.clienteSeleccionado.id);
+          if (cliente) setClienteSeleccionado(cliente);
+        }
+        
+        notify.success('Datos restaurados', 'Se han restaurado los datos del formulario anterior');
+      }
+    }
+  });
 
   // Generar número de venta (VT- en lugar de OT-)
   const generarNumeroVenta = () => {
@@ -79,24 +132,29 @@ export default function VentaForm({ isOpen, onClose, onSave }: VentaFormProps) {
     ).slice(0, 5);
   }, [clientes, buscarClienteExistente]);
 
-  // Resetear formulario cuando se abre
+  // Resetear formulario cuando se abre (pero primero intentar restaurar)
   useEffect(() => {
     if (isOpen) {
+      // El hook de auto-guardado restaurará automáticamente si hay datos guardados
+      // Si no hay datos guardados, resetear normalmente
       setIsLoading(false);
-      setBusquedaRepuesto('');
-      setRepuestosSeleccionados([]);
-      setPrecioFinal('');
-      setClienteNombre('');
-      setClienteRut('');
-      setClienteTelefono('');
-      setClienteEmail('');
-      setBuscarClienteExistente('');
-      setClienteSeleccionado(null);
-      setMetodoPago('Efectivo');
-      setNumeroCuotas(1);
-      setFechasPago([]);
+      const restored = restore();
+      if (!restored) {
+        setBusquedaRepuesto('');
+        setRepuestosSeleccionados([]);
+        setPrecioFinal('');
+        setClienteNombre('');
+        setClienteRut('');
+        setClienteTelefono('');
+        setClienteEmail('');
+        setBuscarClienteExistente('');
+        setClienteSeleccionado(null);
+        setMetodoPago('Efectivo');
+        setNumeroCuotas(1);
+        setFechasPago([]);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, restore]);
 
   // Enfocar input cuando se abre
   useEffect(() => {
@@ -458,6 +516,9 @@ export default function VentaForm({ isOpen, onClose, onSave }: VentaFormProps) {
       const fechasCuotasParaEnviar = metodoPago === 'Crédito' ? fechasPago : undefined;
       const fechaPagoPrincipal = metodoPago === 'Crédito' ? fechasPago[0] : new Date().toISOString().split('T')[0];
 
+      // Limpiar auto-guardado antes de guardar
+      clear();
+      
       await onSave(
         ordenData,
         detallesParaGuardar,
@@ -492,10 +553,26 @@ export default function VentaForm({ isOpen, onClose, onSave }: VentaFormProps) {
 
   if (!isOpen) return null;
 
+  // Handler para prevenir cierre automático cuando se hace clic fuera
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Solo cerrar si se hace clic directamente en el backdrop, no en el contenido
+    if (e.target === e.currentTarget) {
+      // Verificar si hay datos antes de permitir cerrar
+      const hasData = repuestosSeleccionados.length > 0 || 
+                     precioFinal || 
+                     clienteNombre || 
+                     clienteRut;
+      if (!hasData) {
+        onClose();
+      }
+      // Si hay datos, no cerrar automáticamente (los datos ya están guardados)
+    }
+  };
+
   return (
     <div 
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" 
-      onClick={onClose}
+      onClick={handleBackdropClick}
       style={{ pointerEvents: 'auto' }}
     >
       <div 

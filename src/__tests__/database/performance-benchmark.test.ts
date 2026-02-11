@@ -8,9 +8,11 @@ import { DatabaseService } from '../../database/database';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const testDataDir = path.join(__dirname, '../../../../test-data/performance-benchmark');
+
 jest.mock('electron', () => ({
   app: {
-    getPath: jest.fn(() => path.join(__dirname, '../../../../test-data')),
+    getPath: jest.fn(() => testDataDir),
     isPackaged: false
   }
 }));
@@ -25,12 +27,16 @@ interface BenchmarkResult {
 
 describe('Benchmarks de Rendimiento', () => {
   let dbService: DatabaseService;
-  const testDataDir = path.join(__dirname, '../../../../test-data');
+  const testDataDir = path.join(__dirname, '../../../../test-data/performance-benchmark');
+  const testDbPath = path.join(testDataDir, 'data', 'resortes.db');
   const results: BenchmarkResult[] = [];
 
   beforeAll(async () => {
     if (!fs.existsSync(testDataDir)) {
       fs.mkdirSync(testDataDir, { recursive: true });
+    }
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
     }
     dbService = await DatabaseService.create();
   });

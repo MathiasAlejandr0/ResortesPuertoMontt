@@ -1,6 +1,3 @@
-// Usar el mock existente que evita problemas con import.meta
-jest.mock('../../renderer/utils/cn', () => require('../__mocks__/cn'));
-
 import { Logger } from '../../renderer/utils/cn';
 
 describe('Logger', () => {

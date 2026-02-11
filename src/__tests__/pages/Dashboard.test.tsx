@@ -82,9 +82,9 @@ describe('Dashboard', () => {
     jest.clearAllMocks();
   });
 
-  it('debería renderizar el título del Dashboard', () => {
+  it('debería renderizar las KPI principales', () => {
     render(<Dashboard />);
-    expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    expect(screen.getByText('Ganancias del Mes')).toBeInTheDocument();
   });
 
   it('debería mostrar las KPI cards correctamente', () => {

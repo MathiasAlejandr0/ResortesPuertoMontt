@@ -7,9 +7,11 @@ import { DatabaseService, Cliente, Vehiculo, Cotizacion, OrdenTrabajo, DetalleCo
 import * as fs from 'fs';
 import * as path from 'path';
 
+const testDataDir = path.join(__dirname, '../../../../test-data/transacciones-integracion');
+
 jest.mock('electron', () => ({
   app: {
-    getPath: jest.fn(() => path.join(__dirname, '../../../../test-data'))
+    getPath: jest.fn(() => testDataDir)
   }
 }));
 
@@ -18,8 +20,8 @@ process.env.NODE_ENV = 'development';
 
 describe('Tests de Integración - Transacciones Atómicas', () => {
   let dbService: DatabaseService;
-  const testDataDir = path.join(__dirname, '../../../../test-data');
-  const testDbPath = path.join(testDataDir, 'resortes-transacciones.db');
+  const testDataDir = path.join(__dirname, '../../../../test-data/transacciones-integracion');
+  const testDbPath = path.join(testDataDir, 'data', 'resortes.db');
 
   beforeAll(async () => {
     if (!fs.existsSync(testDataDir)) {
@@ -123,9 +125,14 @@ describe('Tests de Integración - Transacciones Atómicas', () => {
     it('debe hacer rollback si falla al insertar detalles', async () => {
       // Este test requiere un escenario específico donde el detalle falle
       // Por simplicidad, verificamos que la transacción es atómica
+      const baseTimestamp = Date.now();
+      const rutBase = baseTimestamp;
+      const dv = rutBase % 11;
+      const dvFinal = dv === 0 ? '0' : dv === 1 ? 'K' : String(11 - dv);
+
       const cliente = await dbService.saveCliente({
         nombre: 'Cliente Test',
-        rut: '11111111-1',
+        rut: `${rutBase}-${dvFinal}`,
         telefono: '+56911111111',
         activo: true,
       });
@@ -135,7 +142,7 @@ describe('Tests de Integración - Transacciones Atómicas', () => {
         marca: 'Test',
         modelo: 'Test',
         año: 2020,
-        patente: 'TEST01',
+        patente: `TEST-${baseTimestamp}`,
         activo: true,
       });
 
@@ -144,6 +151,7 @@ describe('Tests de Integración - Transacciones Atómicas', () => {
         clienteId: cliente.id!,
         vehiculoId: vehiculo.id!,
         fecha: new Date().toISOString(),
+        validaHasta: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         estado: 'pendiente',
         descripcion: 'Test',
         total: 100000,
@@ -182,9 +190,14 @@ describe('Tests de Integración - Transacciones Atómicas', () => {
 
   describe('saveClienteConVehiculos - Atomicidad', () => {
     it('debe guardar cliente y vehículos en una sola transacción', async () => {
+      const baseTimestamp = Date.now() + 10000;
+      const rutBase = baseTimestamp;
+      const dv = rutBase % 11;
+      const dvFinal = dv === 0 ? '0' : dv === 1 ? 'K' : String(11 - dv);
+
       const cliente: Cliente = {
         nombre: 'Cliente Transacción',
-        rut: '22222222-2',
+        rut: `${rutBase}-${dvFinal}`,
         telefono: '+56922222222',
         activo: true,
       };
@@ -195,7 +208,7 @@ describe('Tests de Integración - Transacciones Atómicas', () => {
           marca: 'Toyota',
           modelo: 'Corolla',
           año: 2020,
-          patente: 'VH-001',
+          patente: `VH-${baseTimestamp}-1`,
           activo: true,
         },
         {
@@ -203,7 +216,7 @@ describe('Tests de Integración - Transacciones Atómicas', () => {
           marca: 'Honda',
           modelo: 'Civic',
           año: 2021,
-          patente: 'VH-002',
+          patente: `VH-${baseTimestamp}-2`,
           activo: true,
         },
       ];

@@ -191,8 +191,8 @@ export default function EditarRepuestoModal({
                   <input
                     type="number"
                     min="0"
-                    value={formData.precio}
-                    onChange={(e) => handleInputChange('precio', parseInt(e.target.value) || 0)}
+                    value={formData.precio === 0 ? '' : formData.precio}
+                    onChange={(e) => handleInputChange('precio', e.target.value === '' ? 0 : parseInt(e.target.value))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="Precio"
                   />
@@ -204,8 +204,8 @@ export default function EditarRepuestoModal({
                   <input
                     type="number"
                     min="0"
-                    value={formData.stock}
-                    onChange={(e) => handleInputChange('stock', parseInt(e.target.value) || 0)}
+                    value={formData.stock === 0 ? '' : formData.stock}
+                    onChange={(e) => handleInputChange('stock', e.target.value === '' ? 0 : parseInt(e.target.value))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="Stock actual"
                   />
@@ -217,8 +217,8 @@ export default function EditarRepuestoModal({
                   <input
                     type="number"
                     min="0"
-                    value={formData.stockMinimo}
-                    onChange={(e) => handleInputChange('stockMinimo', parseInt(e.target.value) || 5)}
+                    value={formData.stockMinimo === 0 ? '' : formData.stockMinimo}
+                    onChange={(e) => handleInputChange('stockMinimo', e.target.value === '' ? 0 : parseInt(e.target.value))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="5 (por defecto)"
                   />

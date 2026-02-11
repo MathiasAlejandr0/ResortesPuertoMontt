@@ -3,6 +3,10 @@ export function cn(...inputs: any[]) {
   return inputs.join(' ');
 }
 
+export function formatearRUT(value: string): string {
+  return value;
+}
+
 const isDev = true;
 
 // Logger simplificado que llama directamente a console para que los spies funcionen

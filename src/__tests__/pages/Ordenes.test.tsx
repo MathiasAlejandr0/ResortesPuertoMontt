@@ -21,19 +21,6 @@ import { AppProvider } from '../../renderer/contexts/AppContext';
   },
 };
 
-// Mock de notify
-jest.mock('../../renderer/utils/cn', () => ({
-  notify: {
-    success: jest.fn(),
-    error: jest.fn(),
-  },
-  confirmAction: jest.fn(() => Promise.resolve(true)),
-  Logger: {
-    log: jest.fn(),
-    error: jest.fn(),
-  },
-}));
-
 // Mock de servicios
 jest.mock('../../renderer/services/EnvioDocumentosService', () => ({
   envioDocumentosService: {
@@ -60,7 +47,7 @@ describe('OrdenesPage', () => {
     }, { timeout: 3000 });
   });
 
-  it('debería mostrar el botón de nueva orden', async () => {
+  it('debería mostrar el botón de nuevo', async () => {
     render(
       <AppProvider>
         <OrdenesPage />
@@ -68,11 +55,11 @@ describe('OrdenesPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/nueva orden/i)).toBeInTheDocument();
+      expect(screen.getByText(/^nuevo$/i)).toBeInTheDocument();
     });
   });
 
-  it('debería mostrar filtros por estado', async () => {
+  it('debería mostrar mensaje cuando no hay órdenes', async () => {
     render(
       <AppProvider>
         <OrdenesPage />
@@ -80,7 +67,7 @@ describe('OrdenesPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/estado/i)).toBeInTheDocument();
+      expect(screen.getByText(/no hay órdenes de trabajo registradas/i)).toBeInTheDocument();
     });
   });
 });

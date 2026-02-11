@@ -340,8 +340,8 @@ export default function EditarOrdenModal({
                   <input
                     type="number"
                     min="0"
-                    value={formData.kilometrajeEntrada}
-                    onChange={(e) => handleInputChange('kilometrajeEntrada', parseInt(e.target.value) || 0)}
+                    value={formData.kilometrajeEntrada === 0 ? '' : formData.kilometrajeEntrada}
+                    onChange={(e) => handleInputChange('kilometrajeEntrada', e.target.value === '' ? 0 : parseInt(e.target.value))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="Kilometraje de entrada"
                   />
@@ -353,8 +353,8 @@ export default function EditarOrdenModal({
                   <input
                     type="number"
                     min="0"
-                    value={formData.kilometrajeSalida}
-                    onChange={(e) => handleInputChange('kilometrajeSalida', parseInt(e.target.value) || 0)}
+                    value={formData.kilometrajeSalida === 0 ? '' : formData.kilometrajeSalida}
+                    onChange={(e) => handleInputChange('kilometrajeSalida', e.target.value === '' ? 0 : parseInt(e.target.value))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="Kilometraje de salida"
                   />

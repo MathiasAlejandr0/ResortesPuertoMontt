@@ -10,20 +10,26 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Mock de electron.app
+const testDataDir = path.join(__dirname, '../../../../test-data/load-test');
+
 jest.mock('electron', () => ({
   app: {
-    getPath: jest.fn(() => path.join(__dirname, '../../../../test-data')),
+    getPath: jest.fn(() => testDataDir),
     isPackaged: false
   }
 }));
 
 describe('Pruebas de Carga - DatabaseService', () => {
   let dbService: DatabaseService;
-  const testDataDir = path.join(__dirname, '../../../../test-data');
+  const testDataDir = path.join(__dirname, '../../../../test-data/load-test');
+  const testDbPath = path.join(testDataDir, 'data', 'resortes.db');
 
   beforeAll(async () => {
     if (!fs.existsSync(testDataDir)) {
       fs.mkdirSync(testDataDir, { recursive: true });
+    }
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
     }
     dbService = await DatabaseService.create();
   });
@@ -41,7 +47,7 @@ describe('Pruebas de Carga - DatabaseService', () => {
   describe('Escenario 1: Carga Inicial de Datos', () => {
     it('debe cargar 1,000 clientes en menos de 3 segundos', async () => {
       const startTime = Date.now();
-      const baseTimestamp = Date.now();
+      const baseTimestamp = Date.now() + Math.floor(Math.random() * 100000);
       
       // Crear 1,000 clientes con RUTs únicos
       const clientes = Array.from({ length: 1000 }, (_, i) => {
@@ -134,14 +140,22 @@ describe('Pruebas de Carga - DatabaseService', () => {
   describe('Escenario 2: Búsqueda Intensiva', () => {
     beforeEach(async () => {
       // Crear datos de prueba
+      const baseTimestamp = Date.now();
       for (let i = 0; i < 100; i++) {
-        await dbService.saveCliente({
-          nombre: `Cliente Búsqueda ${i}`,
-          rut: `${20000000 + i}-${i % 10}`,
-          telefono: `+569${String(i).padStart(8, '0')}`,
-          email: `busqueda${i}@test.com`,
-          activo: true
-        });
+        const rutBase = baseTimestamp + i;
+        const dv = rutBase % 11;
+        const dvFinal = dv === 0 ? '0' : dv === 1 ? 'K' : String(11 - dv);
+        try {
+          await dbService.saveCliente({
+            nombre: `Cliente Búsqueda ${i}`,
+            rut: `${rutBase}-${dvFinal}`,
+            telefono: `+569${String(i).padStart(8, '0')}`,
+            email: `busqueda${baseTimestamp}${i}@test.com`,
+            activo: true
+          });
+        } catch {
+          // Ignorar duplicados en pruebas de carga
+        }
       }
     });
 
@@ -185,18 +199,22 @@ describe('Pruebas de Carga - DatabaseService', () => {
       // Asegurar que hay suficientes clientes para paginar
       const existing = await dbService.getAllClientes();
       if (existing.length < 100) {
-        const baseTimestamp = Date.now() + 20000;
+        const baseTimestamp = Date.now() + Math.floor(Math.random() * 100000);
         for (let i = existing.length; i < 100; i++) {
           const rutBase = baseTimestamp + i;
           const dv = rutBase % 11;
           const dvFinal = dv === 0 ? '0' : dv === 1 ? 'K' : String(11 - dv);
-          await dbService.saveCliente({
-            nombre: `Cliente Paginado ${i}`,
-            rut: `${rutBase}-${dvFinal}`,
-            telefono: `+569${String(i + 20000).padStart(8, '0')}`,
-            email: `paginado${baseTimestamp}${i}@test.com`,
-            activo: true
-          });
+          try {
+            await dbService.saveCliente({
+              nombre: `Cliente Paginado ${i}`,
+              rut: `${rutBase}-${dvFinal}`,
+              telefono: `+569${String(i + 20000).padStart(8, '0')}`,
+              email: `paginado${baseTimestamp}${i}@test.com`,
+              activo: true
+            });
+          } catch {
+            // Ignorar duplicados en pruebas de carga
+          }
         }
       }
 

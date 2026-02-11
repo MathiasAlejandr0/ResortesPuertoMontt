@@ -4,6 +4,7 @@ import { Cliente, Vehiculo, Cotizacion, Repuesto } from '../types';
 import { useApp } from '../contexts/AppContext';
 import { notify, Logger, formatearRUT } from '../utils/cn';
 import { ActionDialog } from './ActionDialog';
+import { useAutoSave } from '../hooks/useAutoSave';
 
 interface CotizacionFormProps {
   isOpen: boolean;
@@ -80,10 +81,11 @@ export default function CotizacionFormMejorado({
     });
   }, [clienteSeleccionado?.id, vehiculosDelCliente.length]);
 
-  // Resetear formulario SIEMPRE que se abre (no usar ref para permitir múltiples aperturas)
+  // Resetear formulario SIEMPRE que se abre (pero primero intentar restaurar)
   useLayoutEffect(() => {
     if (isOpen) {
-      // Resetear TODOS los estados INMEDIATAMENTE cuando se abre
+      // El hook de auto-guardado restaurará automáticamente si hay datos guardados
+      // Si no hay datos guardados, resetear normalmente
       setIsLoading(false);
       setStep(1);
       setTipoCliente('existente');
@@ -124,6 +126,62 @@ export default function CotizacionFormMejorado({
   const inputNombreClienteRef = useRef<HTMLInputElement>(null);
   const inputPatenteRef = useRef<HTMLInputElement>(null);
   const textareaDescripcionRef = useRef<HTMLTextAreaElement>(null);
+
+  // Objeto con todos los datos del formulario para auto-guardar
+  const formData = useMemo(() => ({
+    step,
+    tipoCliente,
+    busquedaCliente,
+    clienteSeleccionado: clienteSeleccionado ? { id: clienteSeleccionado.id, nombre: clienteSeleccionado.nombre } : null,
+    nuevoCliente,
+    vehiculoSeleccionado: vehiculoSeleccionado ? { id: vehiculoSeleccionado.id, patente: vehiculoSeleccionado.patente } : null,
+    nuevoVehiculo,
+    descripcionTrabajo,
+    repuestosSeleccionados,
+    precioFinal,
+    observaciones,
+    validaHasta,
+    modoVehiculo
+  }), [
+    step, tipoCliente, busquedaCliente, clienteSeleccionado, nuevoCliente,
+    vehiculoSeleccionado, nuevoVehiculo, descripcionTrabajo,
+    repuestosSeleccionados, precioFinal, observaciones, validaHasta, modoVehiculo
+  ]);
+
+  // Hook de auto-guardado
+  const { restore, clear } = useAutoSave({
+    key: 'cotizacion',
+    data: formData,
+    enabled: isOpen,
+    onRestore: (restored: any) => {
+      if (restored) {
+        Logger.log('📂 Restaurando datos del formulario de cotización:', restored);
+        if (restored.step) setStep(restored.step);
+        if (restored.tipoCliente) setTipoCliente(restored.tipoCliente);
+        if (restored.busquedaCliente) setBusquedaCliente(restored.busquedaCliente);
+        if (restored.nuevoCliente) setNuevoCliente(restored.nuevoCliente);
+        if (restored.nuevoVehiculo) setNuevoVehiculo(restored.nuevoVehiculo);
+        if (restored.descripcionTrabajo) setDescripcionTrabajo(restored.descripcionTrabajo);
+        if (restored.repuestosSeleccionados) setRepuestosSeleccionados(restored.repuestosSeleccionados);
+        if (restored.precioFinal) setPrecioFinal(restored.precioFinal);
+        if (restored.observaciones) setObservaciones(restored.observaciones);
+        if (restored.validaHasta) setValidaHasta(restored.validaHasta);
+        if (restored.modoVehiculo) setModoVehiculo(restored.modoVehiculo);
+        
+        // Restaurar cliente y vehículo seleccionados si existen
+        if (restored.clienteSeleccionado?.id) {
+          const cliente = clientes.find(c => c.id === restored.clienteSeleccionado.id);
+          if (cliente) setClienteSeleccionado(cliente);
+        }
+        if (restored.vehiculoSeleccionado?.id) {
+          const vehiculo = vehiculos.find(v => v.id === restored.vehiculoSeleccionado.id);
+          if (vehiculo) setVehiculoSeleccionado(vehiculo);
+        }
+        
+        notify.success('Datos restaurados', 'Se han restaurado los datos del formulario anterior');
+      }
+    }
+  });
 
   // Enfocar el primer input cuando el modal se abre y el step cambia
   useEffect(() => {
@@ -472,6 +530,9 @@ export default function CotizacionFormMejorado({
       
       // Pasar también los repuestos seleccionados para que el contenedor los persista
       await onSave(cotizacionData as any, repuestosSeleccionados as any);
+      
+      // Limpiar auto-guardado después de guardar exitosamente
+      clear();
       
       // Resetear formulario solo si se guardó exitosamente
       setStep(1);
@@ -1223,14 +1284,32 @@ export default function CotizacionFormMejorado({
     );
   }
 
+  // Wrapper para onOpenChange que previene el cierre automático
+  const handleOpenChange = (newOpen: boolean) => {
+    // Solo cerrar si el usuario explícitamente quiere cerrar (no por pérdida de foco)
+    if (!newOpen) {
+      const hasData = formData.step > 1 || 
+                     formData.clienteSeleccionado || 
+                     formData.nuevoCliente?.nombre || 
+                     formData.descripcionTrabajo || 
+                     formData.repuestosSeleccionados?.length > 0;
+      if (hasData) {
+        onClose();
+      } else {
+        onClose();
+      }
+    }
+  };
+
   // Modo modal (comportamiento original)
   return (
     <ActionDialog
       open={isOpen}
-      onOpenChange={onClose}
+      onOpenChange={handleOpenChange}
       variant="slide-over"
       size="xl"
       title={step === 1 ? "Seleccionar Cliente" : step === 2 ? "Seleccionar Vehículo" : step === 3 ? "Detalles de la Cotización" : "Resumen de la Cotización"}
+      preventAutoClose={true}
     >
       {formContent}
     </ActionDialog>

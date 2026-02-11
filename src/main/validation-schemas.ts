@@ -124,6 +124,20 @@ export const OrdenTrabajoSchema = z.object({
   fechaPago: z.string().optional(),
 });
 
+// Schema para Recordatorio
+export const RecordatorioSchema = z.object({
+  id: z.number().optional(),
+  clienteId: z.number().positive('ClienteId debe ser positivo').nullable().optional(),
+  vehiculoId: z.number().positive('VehiculoId debe ser positivo').nullable().optional(),
+  tipo: z.string().min(1, 'El tipo es requerido').max(50),
+  kilometraje: z.number().int().nonnegative().nullable().optional(),
+  fechaAviso: z.string().min(1, 'La fecha de aviso es requerida'),
+  observaciones: z.string().max(5000).optional().or(z.literal('')),
+  estado: z.enum(['Pendiente', 'Enviado']).optional().default('Pendiente'),
+  fechaCreacion: z.string().optional(),
+  fechaEnvio: z.string().nullable().optional(),
+});
+
 // Schema para DetalleOrden (para uso general)
 export const DetalleOrdenSchema = z.object({
   id: z.number().optional(),

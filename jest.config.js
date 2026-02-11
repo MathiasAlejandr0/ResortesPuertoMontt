@@ -13,7 +13,7 @@ module.exports = {
         allowSyntheticDefaultImports: true,
         target: 'ES2020',
         module: 'ESNext',
-        jsx: 'react',
+        jsx: 'react-jsx',
       },
       isolatedModules: false,
       useESM: false,
@@ -26,6 +26,9 @@ module.exports = {
   },
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^.+/utils/cn$': '<rootDir>/src/__tests__/__mocks__/cn.ts',
+    '^.+/main/services/EncryptionKeyService$': '<rootDir>/src/__tests__/__mocks__/EncryptionKeyService.ts',
+    '^sqlite3$': '<rootDir>/src/__tests__/__mocks__/sqlite3.ts',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
   },
   transformIgnorePatterns: [
@@ -42,5 +45,6 @@ module.exports = {
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
   testTimeout: 10000,
+  maxWorkers: 1,
 };
 

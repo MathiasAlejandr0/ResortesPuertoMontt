@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
@@ -6,9 +6,10 @@ import OCRModal from '../components/OCRModal';
 import InvoiceReviewModal from '../components/InvoiceReviewModal';
 import { useApp } from '../contexts/AppContext';
 import { notify, confirmAction } from '../utils/cn';
+import { Repuesto, Categoria, Proveedor } from '../types';
 
 export default function ProductosPage() {
-  const { refreshRepuestos } = useApp();
+  const { refreshRepuestos, repuestos } = useApp();
   const [filterBy, setFilterBy] = useState('Nombre');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchBy, setSearchBy] = useState('Nom,ID,Cod');
@@ -19,20 +20,139 @@ export default function ProductosPage() {
   const [isOCRModalOpen, setIsOCRModalOpen] = useState(false);
   const [isInvoiceReviewModalOpen, setIsInvoiceReviewModalOpen] = useState(false);
   const [invoiceScanResult, setInvoiceScanResult] = useState<any>(null);
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [formData, setFormData] = useState({
+    codigo: '',
+    nombre: '',
+    descripcion: '',
+    precio: '',
+    precioCosto: '',
+    stock: '',
+    stockMinimo: '',
+    categoria: '',
+    marca: '',
+    ubicacion: '',
+    proveedor: '',
+    activo: true
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [cats, provs] = await Promise.all([
+          window.electronAPI.getAllCategorias(),
+          window.electronAPI.getAllProveedores()
+        ]);
+        setCategorias(cats || []);
+        setProveedores(provs || []);
+      } catch (error) {
+        console.error('Error cargando categorías y proveedores:', error);
+      }
+    };
+    if (isFormOpen) {
+      loadData();
+      setFormData({
+        codigo: '',
+        nombre: '',
+        descripcion: '',
+        precio: '',
+        precioCosto: '',
+        stock: '',
+        stockMinimo: '',
+        categoria: '',
+        marca: '',
+        ubicacion: '',
+        proveedor: '',
+        activo: true
+      });
+    }
+  }, [isFormOpen]);
+
+  const handleInputChange = (field: string, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleSave = async () => {
+    if (!formData.nombre || !formData.precio || formData.stock === '') {
+      notify.error('Error', 'Por favor completa los campos obligatorios (Nombre, Precio, Stock)');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const nuevoRepuesto: Repuesto = {
+        id: Date.now(),
+        codigo: formData.codigo || undefined,
+        nombre: formData.nombre,
+        descripcion: formData.descripcion || '',
+        precio: parseFloat(formData.precio.toString().replace(/[^0-9.-]/g, '')) || 0,
+        precioCosto: parseFloat(formData.precioCosto.toString().replace(/[^0-9.-]/g, '')) || 0,
+        stock: parseInt(formData.stock.toString()) || 0,
+        stockMinimo: parseInt(formData.stockMinimo.toString()) || 5,
+        categoria: formData.categoria || '',
+        marca: formData.marca || '',
+        ubicacion: formData.ubicacion || '',
+        activo: formData.activo
+      };
+
+      await window.electronAPI.saveRepuesto(nuevoRepuesto);
+      await refreshRepuestos();
+      notify.success('Éxito', 'Producto guardado correctamente');
+      setIsFormOpen(false);
+    } catch (error) {
+      console.error('Error guardando producto:', error);
+      notify.error('Error', 'Error al guardar el producto');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const filteredRepuestos = repuestos.filter(repuesto => {
+    if (filterStatus === 'Activos' && !repuesto.activo) return false;
+    if (filterStatus === 'Inactivos' && repuesto.activo) return false;
+    
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      if (searchBy === 'Nom,ID,Cod') {
+        return repuesto.nombre?.toLowerCase().includes(term) ||
+               repuesto.id?.toString().includes(term) ||
+               repuesto.codigo?.toLowerCase().includes(term);
+      } else if (searchBy === 'Nombre') {
+        return repuesto.nombre?.toLowerCase().includes(term);
+      } else if (searchBy === 'ID') {
+        return repuesto.id?.toString().includes(term);
+      } else if (searchBy === 'Código') {
+        return repuesto.codigo?.toLowerCase().includes(term);
+      }
+    }
+    return true;
+  });
 
   if (isFormOpen) {
     return (
       <div className="flex flex-col h-full bg-background text-foreground">
         <div className="flex items-center justify-end px-6 py-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <button onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-sm font-medium rounded border border-border text-gray-700 hover:bg-gray-50 transition-colors">
+            <button 
+              onClick={() => setIsFormOpen(false)} 
+              className="px-4 py-2 text-sm font-medium rounded border border-border text-gray-700 hover:bg-gray-50 transition-colors"
+            >
               Volver
             </button>
-            <button onClick={() => setIsFormOpen(false)} className="px-4 py-2 text-sm font-medium rounded border border-border text-gray-700 hover:bg-gray-50 transition-colors">
+            <button 
+              onClick={() => setIsFormOpen(false)} 
+              className="px-4 py-2 text-sm font-medium rounded border border-border text-gray-700 hover:bg-gray-50 transition-colors"
+            >
               Cancelar
             </button>
-            <button className="btn-primary text-sm px-4 py-2 rounded-md">
-              Confirmar
+            <button 
+              onClick={handleSave}
+              disabled={isSaving}
+              className="btn-primary text-sm px-4 py-2 rounded-md disabled:opacity-50"
+            >
+              {isSaving ? 'Guardando...' : 'Confirmar'}
             </button>
           </div>
         </div>
@@ -46,6 +166,8 @@ export default function ProductosPage() {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Código:</label>
                     <input
                       type="text"
+                      value={formData.codigo}
+                      onChange={(e) => handleInputChange('codigo', e.target.value)}
                       placeholder="Código adicional"
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
@@ -56,20 +178,27 @@ export default function ProductosPage() {
                     </label>
                     <input
                       type="text"
+                      value={formData.nombre}
+                      onChange={(e) => handleInputChange('nombre', e.target.value)}
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                      required
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Marca:</label>
                     <input
                       type="text"
+                      value={formData.marca}
+                      onChange={(e) => handleInputChange('marca', e.target.value)}
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Modelo:</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Ubicación:</label>
                     <input
                       type="text"
+                      value={formData.ubicacion}
+                      onChange={(e) => handleInputChange('ubicacion', e.target.value)}
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                   </div>
@@ -78,14 +207,15 @@ export default function ProductosPage() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Categoría:</label>
-                    <select className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
-                      <option>Seleccionar...</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Unidad medida:</label>
-                    <select className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
-                      <option>UNIDAD</option>
+                    <select 
+                      value={formData.categoria}
+                      onChange={(e) => handleInputChange('categoria', e.target.value)}
+                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                    >
+                      <option value="">Seleccionar...</option>
+                      {categorias.map(cat => (
+                        <option key={cat.id} value={cat.nombre}>{cat.nombre}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -94,13 +224,18 @@ export default function ProductosPage() {
                     </label>
                     <input
                       type="number"
+                      value={formData.stock === '' ? '' : formData.stock}
+                      onChange={(e) => handleInputChange('stock', e.target.value === '' ? '' : parseInt(e.target.value) || '')}
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                      required
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Stock mínimo:</label>
                     <input
                       type="number"
+                      value={formData.stockMinimo === '' ? '' : formData.stockMinimo}
+                      onChange={(e) => handleInputChange('stockMinimo', e.target.value === '' ? '' : parseInt(e.target.value) || '')}
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                   </div>
@@ -111,23 +246,24 @@ export default function ProductosPage() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Proveedor:</label>
-                    <input
-                      type="text"
+                    <select
+                      value={formData.proveedor}
+                      onChange={(e) => handleInputChange('proveedor', e.target.value)}
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
+                    >
+                      <option value="">Seleccionar...</option>
+                      {proveedores.map(prov => (
+                        <option key={prov.id} value={prov.nombre}>{prov.nombre}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Costo compra:</label>
                     <input
                       type="text"
+                      value={formData.precioCosto}
+                      onChange={(e) => handleInputChange('precioCosto', e.target.value)}
                       placeholder="$0.00"
-                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Recargo (%):</label>
-                    <input
-                      type="number"
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                   </div>
@@ -139,25 +275,11 @@ export default function ProductosPage() {
                     </label>
                     <input
                       type="text"
+                      value={formData.precio}
+                      onChange={(e) => handleInputChange('precio', e.target.value)}
                       placeholder="$0.00"
                       className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Impuesto<span className="text-red-600">*</span>:
-                    </label>
-                    <select className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
-                      <option>0</option>
-                      <option>19</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Precio Bruto:</label>
-                    <input
-                      type="text"
-                      placeholder="$0.00"
-                      className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                      required
                     />
                   </div>
                 </div>
@@ -167,6 +289,8 @@ export default function ProductosPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Descripción:</label>
                 <textarea
                   rows={3}
+                  value={formData.descripcion}
+                  onChange={(e) => handleInputChange('descripcion', e.target.value)}
                   className="w-full px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
               </div>
@@ -238,9 +362,7 @@ export default function ProductosPage() {
         ubicacion: 'Estante A1',
         activo: true
       }));
-      for (const repuesto of repuestosParaGuardar) {
-        await window.electronAPI.saveRepuesto(repuesto);
-      }
+      await window.electronAPI.saveRepuestosBatch(repuestosParaGuardar);
       await refreshRepuestos();
       notify.success('Éxito', `Se importaron ${repuestosParaGuardar.length} repuestos.`);
       const confirmed = await confirmAction(
@@ -275,7 +397,7 @@ export default function ProductosPage() {
               Cargar
             </button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-md bg-white text-gray-900">
             <DialogHeader>
               <DialogTitle>Cargar Excel / PDF / Foto</DialogTitle>
             </DialogHeader>
@@ -287,13 +409,16 @@ export default function ProductosPage() {
                 <button
                   onClick={handleExcelUpload}
                   disabled={isUploadingExcel}
-                  className="btn-primary w-full"
+                  className="px-4 py-2 rounded-md bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors w-full disabled:opacity-50"
                 >
                   {isUploadingExcel ? 'Procesando...' : 'Importar Excel'}
                 </button>
                 <button
-                  onClick={() => setIsOCRModalOpen(true)}
-                  className="px-4 py-2 rounded-md border border-gray-300 bg-white text-gray-700 text-sm hover:bg-gray-50 transition-colors w-full"
+                  onClick={() => {
+                    setIsOCRModalOpen(true);
+                    setIsUploadOpen(false);
+                  }}
+                  className="px-4 py-2 rounded-md bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors w-full"
                 >
                   Escanear PDF / Foto
                 </button>
@@ -355,18 +480,31 @@ export default function ProductosPage() {
                   <th className="px-4 py-2 text-left font-semibold">ID</th>
                   <th className="px-4 py-2 text-left font-semibold">Código</th>
                   <th className="px-4 py-2 text-left font-semibold">Marca</th>
-                  <th className="px-4 py-2 text-left font-semibold">Modelo</th>
-                  <th className="px-4 py-2 text-left font-semibold">Proveedor</th>
+                  <th className="px-4 py-2 text-left font-semibold">Categoría</th>
                   <th className="px-4 py-2 text-left font-semibold">Stock</th>
                   <th className="px-4 py-2 text-left font-semibold">Precio</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-border text-gray-500">
-                  <td className="px-4 py-6 text-center" colSpan={8}>
-                    No hay productos registrados
-                  </td>
-                </tr>
+                {filteredRepuestos.length === 0 ? (
+                  <tr className="border-b border-border text-gray-500">
+                    <td className="px-4 py-6 text-center" colSpan={7}>
+                      No hay productos registrados
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRepuestos.map(repuesto => (
+                    <tr key={repuesto.id} className="border-b border-border hover:bg-gray-50">
+                      <td className="px-4 py-2">{repuesto.nombre || '-'}</td>
+                      <td className="px-4 py-2">{repuesto.id || '-'}</td>
+                      <td className="px-4 py-2">{repuesto.codigo || '-'}</td>
+                      <td className="px-4 py-2">{repuesto.marca || '-'}</td>
+                      <td className="px-4 py-2">{repuesto.categoria || '-'}</td>
+                      <td className="px-4 py-2">{repuesto.stock || 0}</td>
+                      <td className="px-4 py-2">${repuesto.precio?.toLocaleString() || '0'}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

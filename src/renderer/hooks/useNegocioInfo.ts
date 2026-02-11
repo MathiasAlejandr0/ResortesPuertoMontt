@@ -5,7 +5,7 @@
  * @version 1.0.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface NegocioInfo {
   nombreTaller: string;
@@ -34,44 +34,54 @@ export function useNegocioInfo() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const cargarNegocioInfo = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
+  const cargarNegocioInfo = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
 
-        // Obtener todas las configuraciones
-        const configs = await window.electronAPI.getAllConfiguracion();
-        
-        // Buscar la configuración del negocio
-        const negocioConfig = configs.find((c: any) => c.clave === 'negocio_info');
-        
-        if (negocioConfig) {
-          try {
-            const info = JSON.parse(negocioConfig.valor);
-            setNegocioInfo(info);
-          } catch (parseError) {
-            console.error('Error parseando información del negocio:', parseError);
-            setError('Error al leer información del negocio');
-            // Usar valores por defecto si hay error al parsear
-            setNegocioInfo(DEFAULT_NEGOCIO_INFO);
-          }
-        } else {
-          // No hay configuración guardada, usar valores por defecto
+      // Obtener todas las configuraciones
+      const configs = await window.electronAPI.getAllConfiguracion();
+      
+      // Buscar la configuración del negocio
+      const negocioConfig = configs.find((c: any) => c.clave === 'negocio_info');
+      
+      if (negocioConfig) {
+        try {
+          const info = JSON.parse(negocioConfig.valor);
+          setNegocioInfo(info);
+        } catch (parseError) {
+          console.error('Error parseando información del negocio:', parseError);
+          setError('Error al leer información del negocio');
+          // Usar valores por defecto si hay error al parsear
           setNegocioInfo(DEFAULT_NEGOCIO_INFO);
         }
-      } catch (err) {
-        console.error('Error cargando información del negocio:', err);
-        setError('Error al cargar información del negocio');
-        // Usar valores por defecto en caso de error
+      } else {
+        // No hay configuración guardada, usar valores por defecto
         setNegocioInfo(DEFAULT_NEGOCIO_INFO);
-      } finally {
-        setIsLoading(false);
+      }
+    } catch (err) {
+      console.error('Error cargando información del negocio:', err);
+      setError('Error al cargar información del negocio');
+      // Usar valores por defecto en caso de error
+      setNegocioInfo(DEFAULT_NEGOCIO_INFO);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargarNegocioInfo();
+
+    const handler = (event: Event) => {
+      const customEvent = event as CustomEvent<{ clave?: string }>;
+      if (!customEvent.detail?.clave || customEvent.detail.clave === 'negocio_info') {
+        cargarNegocioInfo();
       }
     };
 
-    cargarNegocioInfo();
-  }, []);
+    window.addEventListener('config-updated', handler as EventListener);
+    return () => window.removeEventListener('config-updated', handler as EventListener);
+  }, [cargarNegocioInfo]);
 
   return {
     negocioInfo,

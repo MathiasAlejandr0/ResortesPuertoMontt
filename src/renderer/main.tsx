@@ -1,11 +1,14 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import AppNew from './AppNew';
+import { installElectronApiFallback } from './utils/electronFallback';
 import './index.css';
 
 console.log('🚀 main.tsx se está ejecutando');
 console.log('🔍 React version:', React.version);
 console.log('🔍 ReactDOM disponible:', !!ReactDOM);
+
+installElectronApiFallback();
 
 const rootElement = document.getElementById('root');
 // Solo log en desarrollo

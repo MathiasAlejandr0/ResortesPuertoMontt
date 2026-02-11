@@ -47,15 +47,15 @@ export default function ImportarClientesPage() {
               + Para importar archivos a su base de datos de clientes debe tener un Excel con la cantidad de columnas y en el orden mencionado en el diagrama. Los campos obligatorios se encuentran identificados en color rojo. Los campos no obligatorios pueden estar vacíos pero tiene que existir la columna en el orden indicado.
             </div>
             <div>
-              + Si la primer fila contiene los nombres de la columna, elimínela. Deje sólo los datos a cargar.
+              + Si la primer fila contiene los nombres de la columna, elimínela. Deje solo los datos a cargar.
             </div>
             <div>
-              + Condición fiscal puede tener uno de los siguientes valores: Responsable Inscripto, Exento, Consumidor Final, Monotributista, Sujeto no Categorizado, Cliente del Exterior.
+              + Condición tributaria puede tener uno de los siguientes valores: General, Exento, Consumidor final, Pequeño contribuyente, No categorizado, Exterior.
             </div>
           </div>
 
           <div className="rounded-md border border-red-200 bg-red-50 text-sm text-gray-700 px-4 py-3 text-center">
-            <span className="text-red-600">Nombre</span> | N° de | Email | Teléfono | Condición fiscal | Domicilio
+            <span className="text-red-600">Nombre</span> | N° de | Email | Teléfono | Condición tributaria | Dirección
           </div>
         </CardContent>
       </Card>

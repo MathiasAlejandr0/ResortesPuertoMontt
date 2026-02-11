@@ -21,19 +21,6 @@ import { AppProvider } from '../../renderer/contexts/AppContext';
   },
 };
 
-// Mock de notify
-jest.mock('../../renderer/utils/cn', () => ({
-  notify: {
-    success: jest.fn(),
-    error: jest.fn(),
-  },
-  confirmAction: jest.fn(() => Promise.resolve(true)),
-  Logger: {
-    log: jest.fn(),
-    error: jest.fn(),
-  },
-}));
-
 // Mock de servicios
 jest.mock('../../renderer/services/EnvioDocumentosService', () => ({
   envioDocumentosService: {
@@ -54,13 +41,11 @@ describe('CotizacionesPage', () => {
     );
 
     await waitFor(() => {
-      // Buscar el título o cualquier elemento característico
-      const title = screen.queryByText(/cotizaciones/i) || screen.queryByText(/nueva cotización/i);
-      expect(title).toBeInTheDocument();
+      expect(screen.getAllByText(/cotizaciones/i).length).toBeGreaterThan(0);
     }, { timeout: 3000 });
   });
 
-  it('debería mostrar el botón de nueva cotización', async () => {
+  it('debería mostrar el botón de nuevo presupuesto', async () => {
     render(
       <AppProvider>
         <CotizacionesPage />
@@ -68,7 +53,7 @@ describe('CotizacionesPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/nueva cotización/i)).toBeInTheDocument();
+      expect(screen.getByText(/nuevo presupuesto/i)).toBeInTheDocument();
     });
   });
 

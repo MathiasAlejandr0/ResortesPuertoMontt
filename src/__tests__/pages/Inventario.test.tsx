@@ -20,18 +20,6 @@ import { AppProvider } from '../../renderer/contexts/AppContext';
   },
 };
 
-// Mock de notify
-jest.mock('../../renderer/utils/cn', () => ({
-  notify: {
-    success: jest.fn(),
-    error: jest.fn(),
-  },
-  Logger: {
-    log: jest.fn(),
-    error: jest.fn(),
-  },
-}));
-
 describe('InventarioPage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -51,7 +39,7 @@ describe('InventarioPage', () => {
     }, { timeout: 3000 });
   });
 
-  it('debería mostrar el botón de nuevo repuesto', async () => {
+  it('debería mostrar el botón de nuevo item', async () => {
     render(
       <AppProvider>
         <InventarioPage />
@@ -59,7 +47,7 @@ describe('InventarioPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/nuevo repuesto/i)).toBeInTheDocument();
+      expect(screen.getByText(/nuevo item/i)).toBeInTheDocument();
     });
   });
 
@@ -71,7 +59,7 @@ describe('InventarioPage', () => {
     );
 
     await waitFor(() => {
-      const searchInput = screen.getByPlaceholderText(/buscar repuesto/i);
+      const searchInput = screen.getByPlaceholderText(/buscar por nombre/i);
       expect(searchInput).toBeInTheDocument();
     });
   });
@@ -84,7 +72,7 @@ describe('InventarioPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/categoría/i)).toBeInTheDocument();
+      expect(screen.getByText(/todos los estados/i)).toBeInTheDocument();
     });
   });
 });

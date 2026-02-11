@@ -4,6 +4,7 @@ import { Cliente, Vehiculo, OrdenTrabajo, Repuesto, Cotizacion } from '../types'
 import { useApp } from '../contexts/AppContext';
 import { notify, Logger, formatearRUT, Validation } from '../utils/cn';
 import { ActionDialog } from './ActionDialog';
+import { useAutoSave } from '../hooks/useAutoSave';
 
 interface OrdenFormProps {
   isOpen: boolean;
@@ -86,6 +87,7 @@ export default function OrdenFormMejorado({
   // Nuevos campos según Dirup
   const [fechaIngreso, setFechaIngreso] = useState(new Date().toISOString().split('T')[0]);
   const [fechaEgreso, setFechaEgreso] = useState('');
+  const [fechaProgramada, setFechaProgramada] = useState('');
   const [concepto, setConcepto] = useState('REPARACIÓN');
   const [combustible, setCombustible] = useState('Bajo');
   const [nombreInspector, setNombreInspector] = useState('');
@@ -278,11 +280,120 @@ export default function OrdenFormMejorado({
   const inputPatenteRef = useRef<HTMLInputElement>(null);
   const textareaDescripcionRef = useRef<HTMLTextAreaElement>(null);
 
-  // Resetear formulario cuando se abre
+  // Objeto con todos los datos del formulario para auto-guardar
+  const formData = useMemo(() => ({
+    step,
+    tipoCliente,
+    busquedaCliente,
+    clienteSeleccionado: clienteSeleccionado ? { id: clienteSeleccionado.id, nombre: clienteSeleccionado.nombre } : null,
+    nuevoCliente,
+    vehiculoSeleccionado: vehiculoSeleccionado ? { id: vehiculoSeleccionado.id, patente: vehiculoSeleccionado.patente } : null,
+    nuevoVehiculo,
+    descripcionTrabajo,
+    usandoCotizacion,
+    repuestosSeleccionados,
+    detallesOrden,
+    precioFinal,
+    observaciones,
+    prioridad,
+    tecnicoAsignado,
+    kilometrajeEntrada,
+    fechaEntrega,
+    cotizacionSeleccionada: cotizacionSeleccionada ? { id: cotizacionSeleccionada.id } : null,
+    modoVehiculo,
+    fechaIngreso,
+    fechaEgreso,
+    fechaProgramada,
+    concepto,
+    combustible,
+    nombreInspector,
+    numeroSiniestro,
+    franquicia,
+    busquedaProducto,
+    itemsTabla,
+    descuento,
+    efectivo,
+    cuentaCorriente,
+    totalPago,
+    comentarioInterno,
+    mode
+  }), [
+    step, tipoCliente, busquedaCliente, clienteSeleccionado, nuevoCliente,
+    vehiculoSeleccionado, nuevoVehiculo, descripcionTrabajo, usandoCotizacion,
+    repuestosSeleccionados, detallesOrden, precioFinal, observaciones,
+    prioridad, tecnicoAsignado, kilometrajeEntrada, fechaEntrega,
+    cotizacionSeleccionada, modoVehiculo, fechaIngreso, fechaEgreso,
+    fechaProgramada, concepto, combustible, nombreInspector, numeroSiniestro,
+    franquicia, busquedaProducto, itemsTabla, descuento, efectivo,
+    cuentaCorriente, totalPago, comentarioInterno, mode
+  ]);
+
+  // Hook de auto-guardado
+  const { restore, clear } = useAutoSave({
+    key: `orden_${mode}`,
+    data: formData,
+    enabled: isOpen,
+    onRestore: (restored: any) => {
+      if (restored) {
+        Logger.log('📂 Restaurando datos del formulario de orden:', restored);
+        if (restored.step) setStep(restored.step);
+        if (restored.tipoCliente) setTipoCliente(restored.tipoCliente);
+        if (restored.busquedaCliente) setBusquedaCliente(restored.busquedaCliente);
+        if (restored.nuevoCliente) setNuevoCliente(restored.nuevoCliente);
+        if (restored.nuevoVehiculo) setNuevoVehiculo(restored.nuevoVehiculo);
+        if (restored.descripcionTrabajo) setDescripcionTrabajo(restored.descripcionTrabajo);
+        if (restored.repuestosSeleccionados) setRepuestosSeleccionados(restored.repuestosSeleccionados);
+        if (restored.detallesOrden) setDetallesOrden(restored.detallesOrden);
+        if (restored.precioFinal) setPrecioFinal(restored.precioFinal);
+        if (restored.observaciones) setObservaciones(restored.observaciones);
+        if (restored.prioridad) setPrioridad(restored.prioridad);
+        if (restored.tecnicoAsignado) setTecnicoAsignado(restored.tecnicoAsignado);
+        if (restored.kilometrajeEntrada !== undefined) setKilometrajeEntrada(restored.kilometrajeEntrada);
+        if (restored.fechaEntrega) setFechaEntrega(restored.fechaEntrega);
+        if (restored.modoVehiculo) setModoVehiculo(restored.modoVehiculo);
+        if (restored.fechaIngreso) setFechaIngreso(restored.fechaIngreso);
+        if (restored.fechaEgreso) setFechaEgreso(restored.fechaEgreso);
+        if (restored.fechaProgramada) setFechaProgramada(restored.fechaProgramada);
+        if (restored.concepto) setConcepto(restored.concepto);
+        if (restored.combustible) setCombustible(restored.combustible);
+        if (restored.nombreInspector) setNombreInspector(restored.nombreInspector);
+        if (restored.numeroSiniestro) setNumeroSiniestro(restored.numeroSiniestro);
+        if (restored.franquicia) setFranquicia(restored.franquicia);
+        if (restored.busquedaProducto) setBusquedaProducto(restored.busquedaProducto);
+        if (restored.itemsTabla) setItemsTabla(restored.itemsTabla);
+        if (restored.descuento !== undefined) setDescuento(restored.descuento);
+        if (restored.efectivo !== undefined) setEfectivo(restored.efectivo);
+        if (restored.cuentaCorriente) setCuentaCorriente(restored.cuentaCorriente);
+        if (restored.totalPago !== undefined) setTotalPago(restored.totalPago);
+        if (restored.comentarioInterno) setComentarioInterno(restored.comentarioInterno);
+        if (restored.usandoCotizacion !== undefined) setUsandoCotizacion(restored.usandoCotizacion);
+        if (restored.totalBloqueado !== undefined) setTotalBloqueado(restored.totalBloqueado);
+        
+        // Restaurar cliente y vehículo seleccionados si existen
+        if (restored.clienteSeleccionado?.id) {
+          const cliente = clientes.find(c => c.id === restored.clienteSeleccionado.id);
+          if (cliente) setClienteSeleccionado(cliente);
+        }
+        if (restored.vehiculoSeleccionado?.id) {
+          const vehiculo = vehiculos.find(v => v.id === restored.vehiculoSeleccionado.id);
+          if (vehiculo) setVehiculoSeleccionado(vehiculo);
+        }
+        if (restored.cotizacionSeleccionada?.id) {
+          const cotizacion = cotizaciones.find(c => c.id === restored.cotizacionSeleccionada.id);
+          if (cotizacion) setCotizacionSeleccionada(cotizacion);
+        }
+        
+        notify.success('Datos restaurados', 'Se han restaurado los datos del formulario anterior');
+      }
+    }
+  });
+
+  // Resetear formulario cuando se abre (pero primero intentar restaurar)
   // Usar useEffect en lugar de useLayoutEffect para evitar bloquear el render inicial
   useEffect(() => {
     if (isOpen) {
-      // Resetear TODOS los estados cuando se abre
+      // El hook de auto-guardado restaurará automáticamente si hay datos guardados
+      // Si no hay datos guardados, resetear normalmente
       setIsLoading(false);
       setStep(1);
       setTipoCliente('existente');
@@ -328,6 +439,7 @@ export default function OrdenFormMejorado({
       // Resetear nuevos campos
       setFechaIngreso(new Date().toISOString().split('T')[0]);
       setFechaEgreso('');
+      setFechaProgramada('');
       setConcepto('REPARACIÓN');
       setCombustible('Bajo');
       setNombreInspector('');
@@ -626,6 +738,7 @@ export default function OrdenFormMejorado({
       let totalCalculado = 0;
       let fechaIngresoISO = '';
       let fechaEgresoISO = '';
+      let fechaProgramadaISO: string | undefined;
       let observacionesFinal = observaciones;
 
       // Si está en modo fullPage, usar los nuevos campos
@@ -688,6 +801,7 @@ export default function OrdenFormMejorado({
         // Usar fechas del formulario
         fechaIngresoISO = fechaIngreso ? new Date(fechaIngreso).toISOString() : new Date().toISOString();
         fechaEgresoISO = fechaEgreso ? new Date(fechaEgreso).toISOString() : '';
+        fechaProgramadaISO = fechaProgramada ? new Date(fechaProgramada).toISOString() : undefined;
 
         // Combinar observaciones y comentario interno
         if (comentarioInterno) {
@@ -844,6 +958,7 @@ export default function OrdenFormMejorado({
           vehiculoId: vehiculoFinal.id!,
           fechaIngreso: fechaIngresoISO,
           fechaEntrega: fechaEgresoISO,
+          fechaProgramada: fechaProgramadaISO,
           estado: 'En Progreso', // Las órdenes nuevas se crean automáticamente como "En Progreso"
           descripcion: fullPage ? (descripcionTrabajo || concepto || 'Orden de trabajo') : descripcionTrabajo,
           observaciones: observacionesFinal,
@@ -896,6 +1011,9 @@ export default function OrdenFormMejorado({
         await onSave(ordenData as any, detallesParaGuardar as any);
       }
       
+      // Limpiar auto-guardado después de guardar exitosamente
+      clear();
+      
       // Resetear formulario completamente
       setStep(1);
       setTipoCliente('existente');
@@ -939,6 +1057,7 @@ export default function OrdenFormMejorado({
       // Resetear nuevos campos
       setFechaIngreso(new Date().toISOString().split('T')[0]);
       setFechaEgreso('');
+      setFechaProgramada('');
       setConcepto('REPARACIÓN');
       setCombustible('Bajo');
       setNombreInspector('');
@@ -1766,7 +1885,7 @@ export default function OrdenFormMejorado({
           <div className="max-w-7xl mx-auto space-y-6">
             {/* Sección 1: Fechas y Técnico */}
             <div className="bg-white p-4 rounded-lg border border-gray-200">
-              <div className={`grid grid-cols-1 ${isPresupuesto ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4`}>
+              <div className={`grid grid-cols-1 ${isPresupuesto ? 'md:grid-cols-2' : 'md:grid-cols-4'} gap-4`}>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     {isPresupuesto ? 'Fecha emisión:' : 'Fecha ingreso:'}
@@ -1797,6 +1916,22 @@ export default function OrdenFormMejorado({
                     />
                   </div>
                 </div>
+                {!isPresupuesto && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Fecha programada:
+                    </label>
+                    <div className="relative">
+                      <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="datetime-local"
+                        value={fechaProgramada}
+                        onChange={(e) => setFechaProgramada(e.target.value)}
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-900"
+                      />
+                    </div>
+                  </div>
+                )}
                 {!isPresupuesto && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Técnico:</label>
@@ -2016,10 +2151,10 @@ export default function OrdenFormMejorado({
                           <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">
                             <input
                               type="number"
-                              value={item.cantidad}
+                              value={item.cantidad === 0 ? '' : item.cantidad}
                               onChange={(e) => {
                                 const newItems = [...itemsTabla];
-                                newItems[index].cantidad = Number(e.target.value);
+                                newItems[index].cantidad = e.target.value === '' ? 0 : Number(e.target.value);
                                 newItems[index].subtotal = newItems[index].importe * newItems[index].cantidad * (1 - newItems[index].bonif / 100);
                                 newItems[index].iva = newItems[index].subtotal * 0.19;
                                 setItemsTabla(newItems);
@@ -2044,10 +2179,10 @@ export default function OrdenFormMejorado({
                           <td className="px-4 py-2 border border-gray-300 bg-white text-gray-900">
                             <input
                               type="number"
-                              value={item.bonif}
+                              value={item.bonif === 0 ? '' : item.bonif}
                               onChange={(e) => {
                                 const newItems = [...itemsTabla];
-                                newItems[index].bonif = Number(e.target.value);
+                                newItems[index].bonif = e.target.value === '' ? 0 : Number(e.target.value);
                                 newItems[index].subtotal = newItems[index].importe * newItems[index].cantidad * (1 - newItems[index].bonif / 100);
                                 newItems[index].iva = newItems[index].subtotal * 0.19;
                                 setItemsTabla(newItems);
@@ -2076,8 +2211,8 @@ export default function OrdenFormMejorado({
                     <div className="flex items-center gap-2">
                       <input
                         type="number"
-                        value={descuento}
-                        onChange={(e) => setDescuento(Number(e.target.value))}
+                        value={descuento === 0 ? '' : descuento}
+                        onChange={(e) => setDescuento(e.target.value === '' ? 0 : Number(e.target.value))}
                         className="w-20 px-2 py-1 border border-gray-300 rounded text-right"
                       />
                       <span>%</span>
@@ -2115,8 +2250,8 @@ export default function OrdenFormMejorado({
                     <div className="flex items-center gap-2">
                       <input
                         type="number"
-                        value={efectivo}
-                        onChange={(e) => setEfectivo(Number(e.target.value))}
+                        value={efectivo === 0 ? '' : efectivo}
+                        onChange={(e) => setEfectivo(e.target.value === '' ? 0 : Number(e.target.value))}
                         className="w-32 px-2 py-1 border border-gray-300 rounded text-right"
                       />
                       <Info className="h-4 w-4 text-red-600" />
@@ -2134,8 +2269,8 @@ export default function OrdenFormMejorado({
                       </select>
                       <input
                         type="number"
-                        value={totalPago}
-                        onChange={(e) => setTotalPago(Number(e.target.value))}
+                        value={totalPago === 0 ? '' : totalPago}
+                        onChange={(e) => setTotalPago(e.target.value === '' ? 0 : Number(e.target.value))}
                         className="w-32 px-2 py-1 border border-gray-300 rounded text-right"
                       />
                       <AlertTriangle className="h-4 w-4 text-red-600" />
@@ -2372,13 +2507,17 @@ export default function OrdenFormMejorado({
   }
 
   // Modo modal (comportamiento original)
+  // El preventAutoClose en ActionDialog ya previene el cierre automático
+  // Los datos se guardan automáticamente, así que el formulario puede permanecer abierto
+
   return (
     <ActionDialog
       open={isOpen}
-      onOpenChange={onClose}
+      onOpenChange={handleOpenChange}
       variant="modal"
       size="xl"
       title={step === 1 ? "Seleccionar Cliente" : step === 2 ? "Seleccionar Vehículo" : step === 3 ? "Detalles del Trabajo" : "Resumen de la Orden"}
+      preventAutoClose={true}
     >
       {formContent}
     </ActionDialog>

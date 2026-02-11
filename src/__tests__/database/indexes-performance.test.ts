@@ -8,20 +8,26 @@ import { DatabaseService } from '../../database/database';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const testDataDir = path.join(__dirname, '../../../../test-data/indexes-performance');
+
 jest.mock('electron', () => ({
   app: {
-    getPath: jest.fn(() => path.join(__dirname, '../../../../test-data')),
+    getPath: jest.fn(() => testDataDir),
     isPackaged: false
   }
 }));
 
 describe('Rendimiento de Índices', () => {
   let dbService: DatabaseService;
-  const testDataDir = path.join(__dirname, '../../../../test-data');
+  const testDataDir = path.join(__dirname, '../../../../test-data/indexes-performance');
+  const testDbPath = path.join(testDataDir, 'data', 'resortes.db');
 
   beforeAll(async () => {
     if (!fs.existsSync(testDataDir)) {
       fs.mkdirSync(testDataDir, { recursive: true });
+    }
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
     }
     dbService = await DatabaseService.create();
     

@@ -1,58 +1,58 @@
-import { useState, useEffect, ReactNode } from 'react';
+import { useState, useEffect, ReactNode, Suspense, lazy } from 'react';
 import './index.css';
 import DashboardLayout from './components/DashboardLayout';
-import Dashboard from './pages/Dashboard';
-import ClientesListadoPage from './pages/ClientesListado';
-import CotizacionesPage from './pages/Cotizaciones';
-import InventarioPage from './pages/Inventario';
-import OrdenesPage from './pages/Ordenes';
-import AgendaPage from './pages/Agenda';
-import RecordatoriosPage from './pages/Recordatorios';
-import VehiculosPage from './pages/Vehiculos';
-import HistoricoPage from './pages/Historico';
-import TiendaPage from './pages/Tienda';
-import CierresCajaPage from './pages/CierresCaja';
-import MovimientosCajaPage from './pages/MovimientosCaja';
-import SaldosCuentasPage from './pages/SaldosCuentas';
-import MovimientosCuentasPage from './pages/MovimientosCuentas';
-import ProductosPage from './pages/Productos';
-import EditorProductosPage from './pages/EditorProductos';
-import EditorServiciosPage from './pages/EditorServicios';
-import ServiciosListadoPage from './pages/ServiciosListado';
-import CategoriasListadoPage from './pages/CategoriasListado';
-import ProveedoresListadoPage from './pages/ProveedoresListado';
-import GraficasGeneralPage from './pages/GraficasGeneral';
-import GraficasProductosPage from './pages/GraficasProductos';
-import GraficasServiciosPage from './pages/GraficasServicios';
-import InformesClientePage from './pages/InformesCliente';
-import InformesVehiculoPage from './pages/InformesVehiculo';
-import InformesVehiculoDetalladoPage from './pages/InformesVehiculoDetallado';
-import InformesCuentaCorrientePage from './pages/InformesCuentaCorriente';
-import ImportarProductosPage from './pages/ImportarProductos';
-import ImportarServiciosPage from './pages/ImportarServicios';
-import ImportarClientesPage from './pages/ImportarClientes';
-import ExportarPage from './pages/Exportar';
-import ConfiguracionComprobantesPage from './pages/ConfiguracionComprobantes';
-import ConfiguracionFormulariosPage from './pages/ConfiguracionFormularios';
-import ConfiguracionSistemaPage from './pages/ConfiguracionSistema';
-import TrabajadoresListadoPage from './pages/TrabajadoresListado';
-import PagosTrabajadoresPage from './pages/PagosTrabajadores';
-import ScoreTrabajadoresPage from './pages/ScoreTrabajadores';
-import PagosPage from './pages/Pagos';
-import ConfiguracionPage from './pages/Configuracion';
-import CajaDiariaPage from './pages/CajaDiaria';
-import ReporteTecnicosPage from './pages/ReporteTecnicos';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorBoundary from './components/ErrorBoundary';
 import ManualUsuario from './components/ManualUsuario';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { Toaster } from 'sonner';
 import { Logger, notify } from './utils/cn';
-import { 
-  Edit as EditIcon, 
-  Delete as DeleteIcon,
-  Eye as ViewIcon
-} from 'lucide-react';
+
+// Dashboard se carga de forma estática ya que es la página principal
+import Dashboard from './pages/Dashboard';
+
+// Lazy loading de todas las demás páginas para code-splitting
+const ClientesListadoPage = lazy(() => import('./pages/ClientesListado'));
+const CotizacionesPage = lazy(() => import('./pages/Cotizaciones'));
+const InventarioPage = lazy(() => import('./pages/Inventario'));
+const OrdenesPage = lazy(() => import('./pages/Ordenes'));
+const AgendaPage = lazy(() => import('./pages/Agenda'));
+const RecordatoriosPage = lazy(() => import('./pages/Recordatorios'));
+const VehiculosPage = lazy(() => import('./pages/Vehiculos'));
+const HistoricoPage = lazy(() => import('./pages/Historico'));
+const TiendaPage = lazy(() => import('./pages/Tienda'));
+const CierresCajaPage = lazy(() => import('./pages/CierresCaja'));
+const MovimientosCajaPage = lazy(() => import('./pages/MovimientosCaja'));
+const SaldosCuentasPage = lazy(() => import('./pages/SaldosCuentas'));
+const MovimientosCuentasPage = lazy(() => import('./pages/MovimientosCuentas'));
+const ProductosPage = lazy(() => import('./pages/Productos'));
+const EditorProductosPage = lazy(() => import('./pages/EditorProductos'));
+const EditorServiciosPage = lazy(() => import('./pages/EditorServicios'));
+const ServiciosListadoPage = lazy(() => import('./pages/ServiciosListado'));
+const CategoriasListadoPage = lazy(() => import('./pages/CategoriasListado'));
+const ProveedoresListadoPage = lazy(() => import('./pages/ProveedoresListado'));
+const GraficasGeneralPage = lazy(() => import('./pages/GraficasGeneral'));
+const GraficasProductosPage = lazy(() => import('./pages/GraficasProductos'));
+const GraficasServiciosPage = lazy(() => import('./pages/GraficasServicios'));
+const InformesClientePage = lazy(() => import('./pages/InformesCliente'));
+const InformesVehiculoPage = lazy(() => import('./pages/InformesVehiculo'));
+const InformesVehiculoDetalladoPage = lazy(() => import('./pages/InformesVehiculoDetallado'));
+const InformesCuentaCorrientePage = lazy(() => import('./pages/InformesCuentaCorriente'));
+const ImportarProductosPage = lazy(() => import('./pages/ImportarProductos'));
+const ImportarServiciosPage = lazy(() => import('./pages/ImportarServicios'));
+const ImportarClientesPage = lazy(() => import('./pages/ImportarClientes'));
+const ExportarPage = lazy(() => import('./pages/Exportar'));
+const ConfiguracionComprobantesPage = lazy(() => import('./pages/ConfiguracionComprobantes'));
+const ConfiguracionFormulariosPage = lazy(() => import('./pages/ConfiguracionFormularios'));
+const ConfiguracionSistemaPage = lazy(() => import('./pages/ConfiguracionSistema'));
+const TrabajadoresListadoPage = lazy(() => import('./pages/TrabajadoresListado'));
+const PagosTrabajadoresPage = lazy(() => import('./pages/PagosTrabajadores'));
+const ScoreTrabajadoresPage = lazy(() => import('./pages/ScoreTrabajadores'));
+const PagosPage = lazy(() => import('./pages/Pagos'));
+const ConfiguracionPage = lazy(() => import('./pages/Configuracion'));
+const CajaDiariaPage = lazy(() => import('./pages/CajaDiaria'));
+const ReporteTecnicosPage = lazy(() => import('./pages/ReporteTecnicos'));
+const PerfilPage = lazy(() => import('./pages/Perfil'));
 
 // Manejo global de errores de JavaScript
 window.addEventListener('error', (event) => {
@@ -207,6 +207,46 @@ function AppContent() {
     window.electronAPI.on('menu:ir-configuracion', irConfiguracion);
   }, []);
 
+  // Acciones rápidas desde dashboard u otros módulos
+  useEffect(() => {
+    const handleQuickAction = (event: Event) => {
+      const customEvent = event as CustomEvent<{ action?: string }>;
+      const action = customEvent.detail?.action;
+      if (!action) return;
+
+      if (action === 'nueva-orden') {
+        setCurrentPage('ordenes');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('app:nueva-orden'));
+        }, 100);
+      } else if (action === 'nuevo-cliente') {
+        setCurrentPage('clientes');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('app:nuevo-cliente'));
+        }, 100);
+      } else if (action === 'venta-rapida') {
+        setCurrentPage('tienda');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('app:venta-rapida'));
+        }, 100);
+      }
+    };
+
+    window.addEventListener('app:quick-action', handleQuickAction as EventListener);
+    return () => window.removeEventListener('app:quick-action', handleQuickAction as EventListener);
+  }, []);
+
+  // Componente wrapper para lazy loaded pages con Suspense
+  const LazyPageWrapper = ({ children }: { children: ReactNode }) => (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-64">
+        <LoadingSpinner size="medium" text="Cargando página..." />
+      </div>
+    }>
+      {children}
+    </Suspense>
+  );
+
   const renderPage = () => {
     try {
       Logger.log('🔧 AppNew.tsx: Renderizando página:', currentPage);
@@ -236,25 +276,25 @@ function AppContent() {
           );
         case 'ordenes':
           Logger.log('🔧 AppContent: Renderizando OrdenesPage');
-          return <OrdenesPage />;
+          return <LazyPageWrapper><OrdenesPage /></LazyPageWrapper>;
         case 'cotizaciones':
           Logger.log('🔧 AppContent: Renderizando CotizacionesPage');
-          return <CotizacionesPage />;
+          return <LazyPageWrapper><CotizacionesPage /></LazyPageWrapper>;
         case 'calendario':
           Logger.log('🔧 AppContent: Renderizando CalendarioPage');
-          return <AgendaPage />;
+          return <LazyPageWrapper><AgendaPage /></LazyPageWrapper>;
         case 'historico':
           Logger.log('🔧 AppContent: Renderizando HistoricoPage');
-          return <HistoricoPage />;
+          return <LazyPageWrapper><HistoricoPage /></LazyPageWrapper>;
         case 'vehiculos-registrados':
           Logger.log('🔧 AppContent: Renderizando VehiculosPage');
-          return <VehiculosPage />;
+          return <LazyPageWrapper><VehiculosPage /></LazyPageWrapper>;
         case 'avisos-programados':
           Logger.log('🔧 AppContent: Renderizando RecordatoriosPage');
-          return <RecordatoriosPage />;
+          return <LazyPageWrapper><RecordatoriosPage /></LazyPageWrapper>;
         case 'tienda':
           Logger.log('🔧 AppContent: Renderizando TiendaPage');
-          return <TiendaPage />;
+          return <LazyPageWrapper><TiendaPage /></LazyPageWrapper>;
         case 'compras':
           Logger.log('🔧 AppContent: Renderizando ComprasPage');
           return renderPlaceholderPage(
@@ -269,13 +309,13 @@ function AppContent() {
           );
         case 'saldos':
           Logger.log('🔧 AppContent: Renderizando SaldosCuentasPage');
-          return <SaldosCuentasPage />;
+          return <LazyPageWrapper><SaldosCuentasPage /></LazyPageWrapper>;
         case 'movimientos-cuentas':
           Logger.log('🔧 AppContent: Renderizando MovimientosCuentasPage');
-          return <MovimientosCuentasPage />;
+          return <LazyPageWrapper><MovimientosCuentasPage /></LazyPageWrapper>;
         case 'trabajadores':
           Logger.log('🔧 AppContent: Renderizando TrabajadoresPage');
-          return <TrabajadoresListadoPage />;
+          return <LazyPageWrapper><TrabajadoresListadoPage /></LazyPageWrapper>;
         case 'comisiones':
           Logger.log('🔧 AppContent: Renderizando ComisionesPage');
           return renderPlaceholderPage(
@@ -284,19 +324,19 @@ function AppContent() {
           );
         case 'pagos-trabajadores':
           Logger.log('🔧 AppContent: Renderizando PagosTrabajadoresPage');
-          return <PagosTrabajadoresPage />;
+          return <LazyPageWrapper><PagosTrabajadoresPage /></LazyPageWrapper>;
         case 'score-trabajadores':
           Logger.log('🔧 AppContent: Renderizando ScoreTrabajadoresPage');
-          return <ScoreTrabajadoresPage />;
+          return <LazyPageWrapper><ScoreTrabajadoresPage /></LazyPageWrapper>;
         case 'graficas':
           Logger.log('🔧 AppContent: Renderizando GraficasPage');
-          return <GraficasGeneralPage />;
+          return <LazyPageWrapper><GraficasGeneralPage /></LazyPageWrapper>;
         case 'graficas-productos':
           Logger.log('🔧 AppContent: Renderizando GraficasProductosPage');
-          return <GraficasProductosPage />;
+          return <LazyPageWrapper><GraficasProductosPage /></LazyPageWrapper>;
         case 'graficas-servicios':
           Logger.log('🔧 AppContent: Renderizando GraficasServiciosPage');
-          return <GraficasServiciosPage />;
+          return <LazyPageWrapper><GraficasServiciosPage /></LazyPageWrapper>;
         case 'tutoriales':
           Logger.log('🔧 AppContent: Renderizando TutorialesPage');
           return renderPlaceholderPage(
@@ -305,13 +345,13 @@ function AppContent() {
           );
         case 'estado-caja':
           Logger.log('🔧 AppContent: Renderizando EstadoCajaPage');
-          return <CajaDiariaPage />;
+          return <LazyPageWrapper><CajaDiariaPage /></LazyPageWrapper>;
         case 'cierres':
           Logger.log('🔧 AppContent: Renderizando CierresCajaPage');
-          return <CierresCajaPage />;
+          return <LazyPageWrapper><CierresCajaPage /></LazyPageWrapper>;
         case 'movimientos':
           Logger.log('🔧 AppContent: Renderizando MovimientosCajaPage');
-          return <MovimientosCajaPage />;
+          return <LazyPageWrapper><MovimientosCajaPage /></LazyPageWrapper>;
         case 'cuentas-corrientes':
           Logger.log('🔧 AppContent: Renderizando CuentasCorrientesPage');
           return renderPlaceholderPage(
@@ -320,64 +360,70 @@ function AppContent() {
           );
         case 'inventario':
           Logger.log('🔧 AppContent: Renderizando ProductosPage');
-          return <ProductosPage />;
+          return <LazyPageWrapper><ProductosPage /></LazyPageWrapper>;
         case 'editor-productos':
           Logger.log('🔧 AppContent: Renderizando EditorProductosPage');
-          return <EditorProductosPage />;
+          return <LazyPageWrapper><EditorProductosPage /></LazyPageWrapper>;
         case 'servicios':
           Logger.log('🔧 AppContent: Renderizando ServiciosPage');
-          return <ServiciosListadoPage />;
+          return <LazyPageWrapper><ServiciosListadoPage /></LazyPageWrapper>;
         case 'editor-servicios':
           Logger.log('🔧 AppContent: Renderizando EditorServiciosPage');
-          return <EditorServiciosPage />;
+          return <LazyPageWrapper><EditorServiciosPage /></LazyPageWrapper>;
         case 'categorias':
           Logger.log('🔧 AppContent: Renderizando CategoriasPage');
-          return <CategoriasListadoPage />;
+          return <LazyPageWrapper><CategoriasListadoPage /></LazyPageWrapper>;
         case 'clientes':
           Logger.log('🔧 AppContent: Renderizando ClientesListadoPage');
-          return <ClientesListadoPage />;
+          return <LazyPageWrapper><ClientesListadoPage /></LazyPageWrapper>;
         case 'proveedores':
           Logger.log('🔧 AppContent: Renderizando ProveedoresListadoPage');
-          return <ProveedoresListadoPage />;
+          return <LazyPageWrapper><ProveedoresListadoPage /></LazyPageWrapper>;
         case 'informes-cliente':
           Logger.log('🔧 AppContent: Renderizando InformesClientePage');
-          return <InformesClientePage />;
+          return <LazyPageWrapper><InformesClientePage /></LazyPageWrapper>;
         case 'informes-vehiculo':
           Logger.log('🔧 AppContent: Renderizando InformesVehiculoPage');
-          return <InformesVehiculoPage />;
+          return <LazyPageWrapper><InformesVehiculoPage /></LazyPageWrapper>;
         case 'informes-vehiculo-detallado':
           Logger.log('🔧 AppContent: Renderizando InformesVehiculoDetalladoPage');
-          return <InformesVehiculoDetalladoPage />;
+          return <LazyPageWrapper><InformesVehiculoDetalladoPage /></LazyPageWrapper>;
         case 'informes-cuenta-corriente':
           Logger.log('🔧 AppContent: Renderizando InformesCuentaCorrientePage');
-          return <InformesCuentaCorrientePage />;
+          return <LazyPageWrapper><InformesCuentaCorrientePage /></LazyPageWrapper>;
         case 'importar-productos':
           Logger.log('🔧 AppContent: Renderizando ImportarProductosPage');
-          return <ImportarProductosPage />;
+          return <LazyPageWrapper><ImportarProductosPage /></LazyPageWrapper>;
         case 'importar-servicios':
           Logger.log('🔧 AppContent: Renderizando ImportarServiciosPage');
-          return <ImportarServiciosPage />;
+          return <LazyPageWrapper><ImportarServiciosPage /></LazyPageWrapper>;
         case 'importar-clientes':
           Logger.log('🔧 AppContent: Renderizando ImportarClientesPage');
-          return <ImportarClientesPage />;
+          return <LazyPageWrapper><ImportarClientesPage /></LazyPageWrapper>;
         case 'exportar':
           Logger.log('🔧 AppContent: Renderizando ExportarPage');
-          return <ExportarPage />;
+          return <LazyPageWrapper><ExportarPage /></LazyPageWrapper>;
         case 'configuracion':
           Logger.log('🔧 AppContent: Renderizando ConfiguracionPage');
-          return <ConfiguracionPage />;
+          return <LazyPageWrapper><ConfiguracionPage /></LazyPageWrapper>;
         case 'configuracion-comprobantes':
           Logger.log('🔧 AppContent: Renderizando ConfiguracionComprobantesPage');
-          return <ConfiguracionComprobantesPage />;
+          return <LazyPageWrapper><ConfiguracionComprobantesPage /></LazyPageWrapper>;
         case 'configuracion-formularios':
           Logger.log('🔧 AppContent: Renderizando ConfiguracionFormulariosPage');
-          return <ConfiguracionFormulariosPage />;
+          return <LazyPageWrapper><ConfiguracionFormulariosPage /></LazyPageWrapper>;
         case 'configuracion-sistema':
           Logger.log('🔧 AppContent: Renderizando ConfiguracionSistemaPage');
-          return <ConfiguracionSistemaPage />;
+          return <LazyPageWrapper><ConfiguracionSistemaPage /></LazyPageWrapper>;
         case 'pagos':
           Logger.log('🔧 AppContent: Renderizando PagosPage');
-          return <PagosPage />;
+          return <LazyPageWrapper><PagosPage /></LazyPageWrapper>;
+        case 'perfil':
+          Logger.log('🔧 AppContent: Renderizando PerfilPage');
+          return <LazyPageWrapper><PerfilPage /></LazyPageWrapper>;
+        case 'reporte-tecnicos':
+          Logger.log('🔧 AppContent: Renderizando ReporteTecnicosPage');
+          return <LazyPageWrapper><ReporteTecnicosPage /></LazyPageWrapper>;
         default:
           Logger.warn('⚠️ Página no encontrada:', currentPage);
           return <Dashboard />;
