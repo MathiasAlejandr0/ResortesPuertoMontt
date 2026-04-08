@@ -1,0 +1,41 @@
+================================================================================
+  RESORTES PUERTO MONTT — Cómo no perder el trabajo (lectura rápida)
+================================================================================
+
+POR QUÉ VOLVÍA LA PÁGINA "GET STARTED" DE VITE
+----------------------------------------------
+Eso pasa cuando el archivo src/App.tsx (u otros) se reemplaza por la plantilla
+original de Vite. Suele ocurrir por:
+
+  • Carpeta sincronizada con OneDrive / nube: conflictos o versiones antiguas.
+  • Abrir otro proyecto o ejecutar "npm create vite" encima por error.
+  • Restaurar una copia vieja sin querer.
+
+QUÉ HICIMOS PARA PROTEGERLO
+---------------------------
+  • Git inicializado en esta carpeta con un COMMIT guardando la app real.
+  • Archivos clave: App.tsx, ClientesModule.tsx, appTypes.ts, App.css
+
+CÓMO RECUPERAR SI SE ROMPE OTRA VEZ
+-----------------------------------
+En PowerShell, dentro de esta carpeta (resortes-desktop):
+
+  git status
+  git checkout -- src/App.tsx
+  git restore .
+
+O para volver al último commit guardado:
+
+  git reset --hard HEAD
+
+CÓMO GUARDAR TUS CAMBIOS A MENUDO
+---------------------------------
+  git add .
+  git commit -m "Descripción de lo que hiciste"
+
+RECOMENDACIÓN FUERTE
+--------------------
+Copiar el proyecto a una ruta FUERA de OneDrive (ej. C:\dev\resortes-desktop)
+y trabajar ahí + Git reduce muchísimo estos borrados misteriosos.
+
+================================================================================
