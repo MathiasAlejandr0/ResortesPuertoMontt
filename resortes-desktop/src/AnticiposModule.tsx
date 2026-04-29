@@ -29,6 +29,7 @@ export function AnticiposModule({ db, setDb, showToast }: Props) {
   const [mesIdx, setMesIdx] = useState(() => new Date().getMonth())
   const [anio, setAnio] = useState(() => new Date().getFullYear())
   const [desc, setDesc] = useState('')
+  const [nowBase] = useState(() => Date.now())
 
   const stats = useMemo(() => {
     const activos = db.anticipos.filter((a) => a.estado === 'Activo')
@@ -40,7 +41,7 @@ export function AnticiposModule({ db, setDb, showToast }: Props) {
     const totalHist = db.anticipos.reduce((s, a) => s + a.monto, 0)
     const nPagados = db.anticipos.filter((a) => a.estado === 'Pagado').length
     return { saldoPend, nActivos: activos.length, totalMes, nMes: esteMes.length, totalHist, nPagados }
-  }, [db.anticipos])
+  }, [db.anticipos, nowBase])
 
   const resumenMensual = useMemo(() => {
     const map: Record<string, number> = {}
@@ -51,7 +52,7 @@ export function AnticiposModule({ db, setDb, showToast }: Props) {
     return Object.entries(map)
       .sort((x, y) => y[0].localeCompare(x[0]))
       .slice(0, 24)
-  }, [db.anticipos])
+  }, [db.anticipos, nowBase])
 
   const historial = useMemo(
     () => [...db.anticipos].sort((a, b) => (a.creado < b.creado ? 1 : -1)),
@@ -59,9 +60,9 @@ export function AnticiposModule({ db, setDb, showToast }: Props) {
   )
 
   const hace7 = useMemo(() => {
-    const t = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const t = nowBase - 7 * 24 * 60 * 60 * 1000
     return db.anticipos.filter((a) => new Date(a.fecha).getTime() >= t)
-  }, [db.anticipos])
+  }, [db.anticipos, nowBase])
 
   const registrar = () => {
     if (!trabId) {
@@ -358,3 +359,4 @@ export function AnticiposModule({ db, setDb, showToast }: Props) {
     </>
   )
 }
+

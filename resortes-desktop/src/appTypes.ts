@@ -166,6 +166,71 @@ export type AnticipoRegistro = {
   creado: string
 }
 
+export type AgendaNota = {
+  id: string
+  titulo: string
+  detalle: string
+  fecha: string
+  estado: 'pendiente' | 'completado'
+  creado: string
+}
+
+export type AgendaRecordatorio = {
+  id: string
+  titulo: string
+  fecha: string
+  obs: string
+  estado: 'pendiente' | 'completado'
+  creado: string
+}
+
+export type AgendaReserva = {
+  id: string
+  cliente: string
+  tel: string
+  fecha: string
+  hora: string
+  motivo: string
+  estado: 'pendiente' | 'confirmada' | 'cancelada'
+  creado: string
+}
+
+export type Vacacion = {
+  id: string
+  mecanicoId: string
+  mecanicoNombre: string
+  desde: string
+  hasta: string
+  diasHabiles: number
+  obs: string
+  creado: string
+}
+
+export type Proveedor = {
+  id: string
+  nombre: string
+  rut: string
+  tel: string
+  email: string
+  rubro: string
+  condicionPago: string
+  obs: string
+  creado: string
+}
+
+export type CompraProveedor = {
+  id: string
+  proveedorId: string
+  proveedorNombre: string
+  fecha: string
+  descripcion: string
+  categoria: string
+  monto: number
+  fpago: string
+  obs: string
+  creado: string
+}
+
 export type Db = {
   clientes: Cliente[]
   vehiculos: Vehiculo[]
@@ -178,6 +243,15 @@ export type Db = {
   categorias: string[]
   creditos: Credito[]
   anticipos: AnticipoRegistro[]
+}
+
+export type AppExtras = {
+  agendaNotas: AgendaNota[]
+  agendaRecordatorios: AgendaRecordatorio[]
+  agendaReservas: AgendaReserva[]
+  vacaciones: Vacacion[]
+  proveedores: Proveedor[]
+  compras: CompraProveedor[]
 }
 
 export type EmpresaConfig = {
@@ -213,4 +287,5 @@ export type AppSettings = {
   banco: BancoConfig
   pdf: PdfConfig
   logoDataUrl: string | null
+  extras: AppExtras
 }

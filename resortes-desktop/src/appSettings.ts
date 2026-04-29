@@ -30,6 +30,14 @@ export function defaultAppSettings(): AppSettings {
       notaLegal: '',
     },
     logoDataUrl: null,
+    extras: {
+      agendaNotas: [],
+      agendaRecordatorios: [],
+      agendaReservas: [],
+      vacaciones: [],
+      proveedores: [],
+      compras: [],
+    },
   }
 }
 
@@ -44,6 +52,16 @@ export function loadAppSettings(): AppSettings {
         banco: { ...d.banco, ...p.banco },
         pdf: { ...d.pdf, ...p.pdf },
         logoDataUrl: p.logoDataUrl ?? null,
+        extras: {
+          ...d.extras,
+          ...(p.extras ?? {}),
+          agendaNotas: p.extras?.agendaNotas ?? d.extras.agendaNotas,
+          agendaRecordatorios: p.extras?.agendaRecordatorios ?? d.extras.agendaRecordatorios,
+          agendaReservas: p.extras?.agendaReservas ?? d.extras.agendaReservas,
+          vacaciones: p.extras?.vacaciones ?? d.extras.vacaciones,
+          proveedores: p.extras?.proveedores ?? d.extras.proveedores,
+          compras: p.extras?.compras ?? d.extras.compras,
+        },
       }
     }
     const legacy = localStorage.getItem('rpm_cfg_empresa')

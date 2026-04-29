@@ -34,11 +34,11 @@ export function ClientesModule({ db, setDb, showToast, onIrVehiculo }: Props) {
     const fd = new FormData(e.currentTarget)
     const nombre = String(fd.get('c_nom') || '').trim()
     const rut = String(fd.get('c_rut') || '').trim()
-    if (!nombre || !rut) {
-      showToast('Nombre y RUT son obligatorios', 'err')
+    if (!nombre) {
+      showToast('El nombre es obligatorio', 'err')
       return
     }
-    if (db.clientes.some((c) => c.rut.toLowerCase() === rut.toLowerCase())) {
+    if (rut && db.clientes.some((c) => c.rut.toLowerCase() === rut.toLowerCase())) {
       showToast('Ya existe un cliente con ese RUT', 'err')
       return
     }
@@ -82,8 +82,8 @@ export function ClientesModule({ db, setDb, showToast, onIrVehiculo }: Props) {
             <input name="c_nom" required placeholder="Juan Pérez García" autoComplete="name" />
           </div>
           <div className="field">
-            <label>RUT *</label>
-            <input name="c_rut" required placeholder="12.345.678-9" autoComplete="off" />
+            <label>RUT</label>
+            <input name="c_rut" placeholder="12.345.678-9" autoComplete="off" />
           </div>
           <div className="field">
             <label>Teléfono</label>

@@ -1,8 +1,7 @@
 import { type ChangeEvent, type Dispatch, type SetStateAction, useRef } from 'react'
 import type { AppSettings, Db } from './appTypes'
-import { LS_SETTINGS, defaultAppSettings } from './appSettings'
+import { defaultAppSettings } from './appSettings'
 
-const LS_KEY = 'rpm_ts3_db_v1'
 const TIPOS_CUENTA = ['Corriente', 'Vista', 'Cuenta RUT', 'Otro']
 
 type Props = {
@@ -144,7 +143,7 @@ export function ConfigModule({ settings, setSettings, db, setDb, emptyDb, showTo
           return
         }
         if (!window.confirm('Se reemplazarán todos los datos actuales. ¿Continuar?')) return
-        localStorage.setItem(LS_KEY, JSON.stringify(data.db))
+        setDb(data.db)
         if (data.settings) {
           const merged = {
             ...defaultAppSettings(),
@@ -154,10 +153,9 @@ export function ConfigModule({ settings, setSettings, db, setDb, emptyDb, showTo
             pdf: { ...defaultAppSettings().pdf, ...data.settings.pdf },
             logoDataUrl: data.settings.logoDataUrl ?? null,
           }
-          localStorage.setItem(LS_SETTINGS, JSON.stringify(merged))
+          setSettings(merged)
         }
-        showToast('Backup importado — recargando…')
-        setTimeout(() => window.location.reload(), 600)
+        showToast('Backup importado (se guardará en Supabase al sincronizar)')
       } catch {
         showToast('No se pudo leer el archivo', 'err')
       }
@@ -172,7 +170,6 @@ export function ConfigModule({ settings, setSettings, db, setDb, emptyDb, showTo
       )
     )
       return
-    localStorage.removeItem(LS_KEY)
     setDb(emptyDb())
     showToast('Datos operativos borrados')
   }

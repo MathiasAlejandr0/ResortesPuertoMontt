@@ -1,24 +1,21 @@
-import { type Dispatch, type FormEvent, type SetStateAction, useEffect, useMemo, useState } from 'react'
+import {
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import * as XLSX from 'xlsx'
-import type {
-  AnticipoRegistro,
-  AppSettings,
-  Cliente,
-  Cotizacion,
-  Credito,
-  Db,
-  Gasto,
-  Mecanico,
-  Orden,
-  Producto,
-  Vehiculo,
-  Venta,
-} from './appTypes'
+import type { AppSettings, Db, Gasto, Vehiculo, Venta } from './appTypes'
 import { ConfigModule } from './ConfigModule'
-import { LS_SETTINGS, loadAppSettings } from './appSettings'
+import { defaultAppSettings } from './appSettings'
 import { AnticiposModule } from './AnticiposModule'
 import { CreditosModule } from './CreditosModule'
 import { GastosModule } from './GastosModule'
+import { AgendaModule } from './AgendaModule'
 import { ReportesModule } from './ReportesModule'
 import { ClientesModule } from './ClientesModule'
 import { CotizacionesModule } from './CotizacionesModule'
@@ -26,13 +23,15 @@ import { InformesModule } from './InformesModule'
 import { InventarioModule } from './InventarioModule'
 import { MecanicosModule } from './MecanicosModule'
 import { OrdenesModule } from './OrdenesModule'
-import { normalizeCotizacion, normalizeOrden, normalizeVenta } from './opsHelpers'
 import { VentasModule } from './VentasModule'
+import { VacacionesModule } from './VacacionesModule'
+import { ProveedoresModule } from './ProveedoresModule'
+import { isSupabaseConfigured, loadOnlineDb, loadOnlineSettings, saveOnlineAll } from './supabaseOnline'
 import './App.css'
 
-const LS_KEY = 'rpm_ts3_db_v1'
-const LS_CFG = 'rpm_cfg_empresa'
 const LS_THEME = 'rpm_theme'
+const LS_PIN_ADMIN = 'rpm_pin_admin'
+const LS_PIN_VENDEDOR = 'rpm_pin_vendedor'
 
 const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
@@ -48,14 +47,6 @@ function uid() {
 
 const defaultCats = ['Lubricantes', 'Repuestos', 'Fluidos', 'Herramientas', 'Mano de obra', 'Otros']
 
-function estadoCredito(cr: Credito): string {
-  const hoy = today()
-  if (cr.saldo <= 0) return 'Pagado'
-  if (cr.saldo < cr.monto) return 'Pagado parcial'
-  if (cr.vcto && cr.vcto < hoy) return 'Vencido'
-  return 'Pendiente'
-}
-
 function emptyDb(): Db {
   return {
     clientes: [],
@@ -69,125 +60,6 @@ function emptyDb(): Db {
     categorias: [...defaultCats],
     creditos: [],
     anticipos: [],
-  }
-}
-
-function normalizeProducto(p: Partial<Producto> & { id: string }): Producto {
-  return {
-    id: p.id,
-    nombre: p.nombre || '',
-    codigo: p.codigo || '',
-    categoria: p.categoria || 'Repuestos',
-    unidad: p.unidad || 'Unidad',
-    precio: Number(p.precio) || 0,
-    costo: Number(p.costo) || 0,
-    stock: Number(p.stock) || 0,
-    smin: Number(p.smin) || 0,
-  }
-}
-
-function normalizeMecanico(m: Partial<Mecanico> & { id: string; creado: string }): Mecanico {
-  return {
-    id: m.id,
-    nombre: m.nombre || '',
-    especialidad: m.especialidad ?? '',
-    tel: m.tel ?? '',
-    email: m.email ?? '',
-    activo: m.activo !== false,
-    creado: m.creado,
-  }
-}
-
-function normalizeCliente(c: Partial<Cliente> & { id: string; creado: string }): Cliente {
-  return {
-    id: c.id,
-    nombre: c.nombre || '',
-    rut: c.rut || '',
-    tel: c.tel || '',
-    email: c.email || '',
-    dir: c.dir ?? '',
-    origen: c.origen ?? 'Recomendación',
-    obs: c.obs ?? '',
-    creado: c.creado,
-  }
-}
-
-function normalizeCredito(c: Partial<Credito> & { id: string; creado: string }): Credito {
-  const abonos = (c.abonos || []).map((a) => ({
-    monto: Number(a.monto) || 0,
-    fecha: a.fecha || today(),
-    obs: a.obs || '',
-    creado: a.creado || new Date().toISOString(),
-  }))
-  const monto = Number(c.monto) || 0
-  const abonado = abonos.reduce((s, a) => s + a.monto, 0)
-  const saldo = Math.max(0, monto - abonado)
-  const base: Credito = {
-    id: c.id,
-    clienteId: c.clienteId ?? null,
-    clienteNombre: c.clienteNombre || '',
-    clienteRut: c.clienteRut || '',
-    monto,
-    saldo,
-    abonos,
-    fecha: c.fecha || today(),
-    vcto: c.vcto || '',
-    desc: c.desc || '',
-    ventaFolio: c.ventaFolio,
-    estado: '',
-    creado: c.creado,
-  }
-  base.estado = estadoCredito(base)
-  return base
-}
-
-function normalizeGasto(g: Partial<Gasto> & { id: string; creado: string }): Gasto {
-  return {
-    id: g.id,
-    desc: g.desc || '',
-    categoria: g.categoria || 'Otros',
-    monto: Number(g.monto) || 0,
-    fecha: g.fecha || today(),
-    proveedor: g.proveedor ?? '',
-    creado: g.creado,
-  }
-}
-
-function normalizeAnticipo(a: Partial<AnticipoRegistro> & { id: string; creado: string }): AnticipoRegistro {
-  const mes = Number(a.mesDescuento)
-  return {
-    id: a.id,
-    trabajadorId: a.trabajadorId || '',
-    trabajadorNombre: a.trabajadorNombre || '',
-    tipo: a.tipo || 'Anticipo de sueldo',
-    monto: Number(a.monto) || 0,
-    fecha: a.fecha || today(),
-    mesDescuento: mes >= 0 && mes <= 11 ? mes : new Date().getMonth(),
-    anioDescuento: Number(a.anioDescuento) || new Date().getFullYear(),
-    desc: a.desc || '',
-    estado: a.estado === 'Pagado' || a.estado === 'Anulado' ? a.estado : 'Activo',
-    creado: a.creado,
-  }
-}
-
-function loadDb(): Db {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    if (!raw) return emptyDb()
-    const p = JSON.parse(raw) as Db
-    const merged: Db = { ...emptyDb(), ...p, categorias: p.categorias?.length ? p.categorias : [...defaultCats] }
-    merged.clientes = (merged.clientes || []).map((c) => normalizeCliente(c as Cliente))
-    merged.inventario = (merged.inventario || []).map((p) => normalizeProducto(p as Producto))
-    merged.mecanicos = (merged.mecanicos || []).map((m) => normalizeMecanico(m as Mecanico))
-    merged.cotizaciones = (merged.cotizaciones || []).map((c) => normalizeCotizacion(c as Cotizacion))
-    merged.ordenes = (merged.ordenes || []).map((o) => normalizeOrden(o as Orden))
-    merged.ventas = (merged.ventas || []).map((v) => normalizeVenta(v as Venta))
-    merged.gastos = (merged.gastos || []).map((g) => normalizeGasto(g as Gasto))
-    merged.creditos = (merged.creditos || []).map((c) => normalizeCredito(c as Credito))
-    merged.anticipos = (merged.anticipos || []).map((a) => normalizeAnticipo(a as AnticipoRegistro))
-    return merged
-  } catch {
-    return emptyDb()
   }
 }
 
@@ -223,6 +95,7 @@ function ultimos6mesesGastos(gastos: Gasto[]) {
 
 type Section =
   | 'dashboard'
+  | 'agenda'
   | 'clientes'
   | 'vehiculos'
   | 'inventario'
@@ -235,7 +108,19 @@ type Section =
   | 'gastos'
   | 'reportes'
   | 'anticipos'
+  | 'vacaciones'
+  | 'proveedores'
   | 'config'
+
+type UserRole = 'admin' | 'vendedor'
+
+function getPinAdmin() {
+  return localStorage.getItem(LS_PIN_ADMIN) || '1749'
+}
+
+function getPinVendedor() {
+  return localStorage.getItem(LS_PIN_VENDEDOR) || '1120'
+}
 
 function VehiculosPane({
   db,
@@ -425,6 +310,7 @@ function VehiculosPane({
 
 const titles: Record<Section, [string, string]> = {
   dashboard: ['Dashboard', 'Resumen general del taller'],
+  agenda: ['Agenda', 'Notas, recordatorios y reservas'],
   clientes: ['Clientes', 'Gestión de clientes'],
   vehiculos: ['Vehículos', 'Maestro de vehículos'],
   inventario: ['Inventario', 'Productos, repuestos y servicios'],
@@ -437,17 +323,29 @@ const titles: Record<Section, [string, string]> = {
   gastos: ['Gastos', 'Control de egresos del taller'],
   reportes: ['Reportes', 'Análisis financiero y estadísticas'],
   anticipos: ['Anticipos / Préstamos / Descuentos', 'Gestión de haberes y descuentos de trabajadores'],
+  vacaciones: ['Vacaciones', 'Control de períodos de descanso'],
+  proveedores: ['Proveedores', 'Gestión de proveedores y compras'],
   config: ['Configuración', 'Datos del taller, documentos y backup'],
 }
 
 export default function App() {
-  const [db, setDb] = useState<Db>(() => loadDb())
-  const [settings, setSettings] = useState<AppSettings>(() => loadAppSettings())
+  const hasSupabase = isSupabaseConfigured()
+  const [db, setDb] = useState<Db>(() => emptyDb())
+  const [settings, setSettings] = useState<AppSettings>(() => defaultAppSettings())
+  const [cloudReady, setCloudReady] = useState(false)
+  const [cloudBusy, setCloudBusy] = useState(hasSupabase)
   const [section, setSection] = useState<Section>('dashboard')
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' | 'warn' } | null>(null)
   const [globalQ, setGlobalQ] = useState('')
   const [dark, setDark] = useState(() => localStorage.getItem(LS_THEME) === 'dark')
   const [vehClientePref, setVehClientePref] = useState('')
+  const [role, setRole] = useState<UserRole>('admin')
+  const [pin, setPin] = useState('')
+  const [pinErr, setPinErr] = useState('')
+  const [unlocked, setUnlocked] = useState(false)
+  const dbRef = useRef(db)
+  const settingsRef = useRef(settings)
+  const restrictedForSeller = useMemo<Section[]>(() => ['anticipos', 'vacaciones', 'gastos', 'reportes', 'config'], [])
 
   const showToast = (msg: string, type: 'ok' | 'err' | 'warn' = 'ok') => {
     setToast({ msg, type })
@@ -455,16 +353,106 @@ export default function App() {
   }
 
   useEffect(() => {
-    localStorage.setItem(LS_KEY, JSON.stringify(db))
+    dbRef.current = db
   }, [db])
   useEffect(() => {
-    localStorage.setItem(LS_SETTINGS, JSON.stringify(settings))
-    localStorage.setItem(LS_CFG, settings.empresa.nombre)
+    settingsRef.current = settings
   }, [settings])
+
+  const purgeLegacyLocalDb = () => {
+    try {
+      localStorage.removeItem('rpm_ts3_db_v1')
+      localStorage.removeItem('rpm_app_settings_v1')
+      localStorage.removeItem('rpm_cfg_empresa')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const pullFromSupabase = useCallback(async (): Promise<boolean> => {
+    if (!hasSupabase) return false
+    setCloudBusy(true)
+    const remote = await loadOnlineDb()
+    const remoteSettings = await loadOnlineSettings()
+    setCloudBusy(false)
+    if (remote) {
+      setDb(remote)
+      purgeLegacyLocalDb()
+      setCloudReady(true)
+      if (remoteSettings) {
+        setSettings({
+          ...defaultAppSettings(),
+          ...remoteSettings,
+          empresa: { ...defaultAppSettings().empresa, ...(remoteSettings.empresa ?? {}) },
+          banco: { ...defaultAppSettings().banco, ...(remoteSettings.banco ?? {}) },
+          pdf: { ...defaultAppSettings().pdf, ...(remoteSettings.pdf ?? {}) },
+          logoDataUrl: remoteSettings.logoDataUrl ?? null,
+          extras: {
+            ...defaultAppSettings().extras,
+            ...(remoteSettings.extras ?? {}),
+            agendaNotas: remoteSettings.extras?.agendaNotas ?? defaultAppSettings().extras.agendaNotas,
+            agendaRecordatorios:
+              remoteSettings.extras?.agendaRecordatorios ?? defaultAppSettings().extras.agendaRecordatorios,
+            agendaReservas: remoteSettings.extras?.agendaReservas ?? defaultAppSettings().extras.agendaReservas,
+            vacaciones: remoteSettings.extras?.vacaciones ?? defaultAppSettings().extras.vacaciones,
+            proveedores: remoteSettings.extras?.proveedores ?? defaultAppSettings().extras.proveedores,
+            compras: remoteSettings.extras?.compras ?? defaultAppSettings().extras.compras,
+          },
+        })
+      }
+      return true
+    }
+    setCloudReady(false)
+    setDb(emptyDb())
+    return false
+  }, [hasSupabase])
+
+  useEffect(() => {
+    if (!hasSupabase) return
+    let cancelled = false
+    void (async () => {
+      const ok = await pullFromSupabase()
+      if (cancelled) return
+      if (!ok) {
+        setToast({
+          msg: 'No se pudo cargar desde Supabase. Revisa red, URL, clave y tablas.',
+          type: 'err',
+        })
+        setTimeout(() => setToast(null), 5200)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [hasSupabase, pullFromSupabase])
+
+  useEffect(() => {
+    if (!hasSupabase || !cloudReady) return
+    const flush = () => void saveOnlineAll(dbRef.current, settingsRef.current)
+    window.addEventListener('pagehide', flush)
+    return () => window.removeEventListener('pagehide', flush)
+  }, [hasSupabase, cloudReady])
+
+  useEffect(() => {
+    if (!hasSupabase || !cloudReady) return
+    const t = window.setTimeout(() => {
+      void (async () => {
+        const ok = await saveOnlineAll(db, settings)
+        if (!ok) showToast('Error al guardar en Supabase', 'err')
+      })()
+    }, 200)
+    return () => window.clearTimeout(t)
+  }, [db, settings, hasSupabase, cloudReady])
+
   useEffect(() => {
     localStorage.setItem(LS_THEME, dark ? 'dark' : 'light')
     document.documentElement.classList.toggle('theme-dark', dark)
   }, [dark])
+
+  useEffect(() => {
+    if (role !== 'vendedor') return
+    if (restrictedForSeller.includes(section)) setSection('dashboard')
+  }, [role, restrictedForSeller, section])
 
   const badgeCred = db.creditos.filter((c) => c.estado !== 'Pagado').length
   const badgeCot = db.cotizaciones.filter((c) => c.estado === 'Pendiente').length
@@ -691,8 +679,108 @@ export default function App() {
       setSection('gastos')
   }
 
+  const appBlocked = !hasSupabase || !cloudReady
+  const roleBlocked = (s: Section) => role === 'vendedor' && restrictedForSeller.includes(s)
+
+  const onUnlock = (e: FormEvent) => {
+    e.preventDefault()
+    const ok = role === 'admin' ? pin === getPinAdmin() : pin === getPinVendedor()
+    if (!ok) {
+      setPinErr('PIN incorrecto')
+      return
+    }
+    setPinErr('')
+    setUnlocked(true)
+    setPin('')
+  }
+
   return (
     <div className="layout">
+      {!unlocked && (
+        <div className="cloud-offline-overlay" role="dialog" aria-modal>
+          <p className="cloud-offline-title">Bienvenido</p>
+          <p className="cloud-offline-hint">Ingresa tu PIN para continuar</p>
+          <form className="pin-login-card" onSubmit={onUnlock}>
+            <div className="pin-role-switch">
+              <button
+                type="button"
+                className={role === 'admin' ? 'pin-role-btn active' : 'pin-role-btn'}
+                onClick={() => {
+                  setRole('admin')
+                  setPinErr('')
+                }}
+              >
+                Administrador
+              </button>
+              <button
+                type="button"
+                className={role === 'vendedor' ? 'pin-role-btn active' : 'pin-role-btn'}
+                onClick={() => {
+                  setRole('vendedor')
+                  setPinErr('')
+                }}
+              >
+                Vendedor
+              </button>
+            </div>
+            <div className="field">
+              <label>PIN de acceso</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={pin}
+                onChange={(e) => {
+                  setPin(e.target.value)
+                  setPinErr('')
+                }}
+                placeholder="••••"
+                autoFocus
+              />
+            </div>
+            {pinErr && <div className="pin-error">{pinErr}</div>}
+            <button type="submit" className="btn btn-primary">
+              Ingresar
+            </button>
+          </form>
+        </div>
+      )}
+      {appBlocked && (
+        <div className="cloud-offline-overlay" role="alertdialog" aria-live="assertive" aria-busy={cloudBusy}>
+          {!hasSupabase ? (
+            <>
+              <p className="cloud-offline-title">Esta aplicación usa solo Supabase</p>
+              <p className="cloud-offline-hint">
+                Crea el archivo <code>.env</code> en la carpeta <code>resortes-desktop</code> con{' '}
+                <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code>, luego reinicia la app
+                (por ejemplo <code>npm run tauri:dev</code>).
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="cloud-offline-title">
+                {cloudBusy ? 'Cargando datos desde Supabase…' : 'No se pudo conectar a Supabase.'}
+              </p>
+              <p className="cloud-offline-hint">
+                Clientes, ventas, inventario y configuración del taller están únicamente en la nube.
+              </p>
+              {!cloudBusy && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    void pullFromSupabase().then((ok) => {
+                      if (!ok) showToast('Sigue sin haber conexión con Supabase', 'err')
+                    })
+                  }}
+                >
+                  Reintentar
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {toast && <div className={`toast-float toast-${toast.type}`}>{toast.msg}</div>}
 
       <nav className="sidebar">
@@ -706,6 +794,10 @@ export default function App() {
           <button type="button" className={section === 'dashboard' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('dashboard')}>
             <span className="ni">📊</span>
             <span>Dashboard</span>
+          </button>
+          <button type="button" className={section === 'agenda' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('agenda')}>
+            <span className="ni">📅</span>
+            <span>Agenda</span>
           </button>
           <div className="nav-group">Maestros</div>
           <button type="button" className={section === 'clientes' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('clientes')}>
@@ -749,20 +841,53 @@ export default function App() {
             <span>Cuentas por Cobrar</span>
             {badgeCred > 0 && <span className="nav-badge">{badgeCred}</span>}
           </button>
-          <button type="button" className={section === 'gastos' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('gastos')}>
+          <button
+            type="button"
+            className={section === 'gastos' ? 'nav-item active' : 'nav-item'}
+            onClick={() => !roleBlocked('gastos') && setSection('gastos')}
+            disabled={roleBlocked('gastos')}
+          >
             <span className="ni">💸</span>
             <span>Gastos</span>
           </button>
-          <button type="button" className={section === 'reportes' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('reportes')}>
+          <button
+            type="button"
+            className={section === 'reportes' ? 'nav-item active' : 'nav-item'}
+            onClick={() => !roleBlocked('reportes') && setSection('reportes')}
+            disabled={roleBlocked('reportes')}
+          >
             <span className="ni">📈</span>
             <span>Reportes</span>
           </button>
-          <button type="button" className={section === 'anticipos' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('anticipos')}>
+          <button
+            type="button"
+            className={section === 'anticipos' ? 'nav-item active' : 'nav-item'}
+            onClick={() => !roleBlocked('anticipos') && setSection('anticipos')}
+            disabled={roleBlocked('anticipos')}
+          >
             <span className="ni">📋</span>
             <span>Anticipos / Préstamos</span>
           </button>
+          <button
+            type="button"
+            className={section === 'vacaciones' ? 'nav-item active' : 'nav-item'}
+            onClick={() => !roleBlocked('vacaciones') && setSection('vacaciones')}
+            disabled={roleBlocked('vacaciones')}
+          >
+            <span className="ni">🏖️</span>
+            <span>Vacaciones</span>
+          </button>
           <div className="nav-group">Sistema</div>
-          <button type="button" className={section === 'config' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('config')}>
+          <button type="button" className={section === 'proveedores' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('proveedores')}>
+            <span className="ni">🏭</span>
+            <span>Proveedores</span>
+          </button>
+          <button
+            type="button"
+            className={section === 'config' ? 'nav-item active' : 'nav-item'}
+            onClick={() => !roleBlocked('config') && setSection('config')}
+            disabled={roleBlocked('config')}
+          >
             <span className="ni">⚙️</span>
             <span>Configuración</span>
           </button>
@@ -784,8 +909,16 @@ export default function App() {
               onChange={(e) => setGlobalQ(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && globalSearch(globalQ)}
             />
+            {hasSupabase && cloudReady && (
+              <span className="cloud-badge" title="Solo Supabase: datos y configuración del taller en la nube">
+                Solo Supabase
+              </span>
+            )}
             <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Modo oscuro" onClick={() => setDark((d) => !d)}>
               {dark ? '☀️' : '🌙'}
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => setUnlocked(false)}>
+              Cerrar sesión
             </button>
             {section === 'clientes' && (
               <button type="button" className="btn btn-sm btn-excel" onClick={exportClientesExcel}>
@@ -928,6 +1061,7 @@ export default function App() {
               </div>
             </>
           )}
+          {section === 'agenda' && <AgendaModule settings={settings} setSettings={setSettings} showToast={showToast} />}
           {section === 'clientes' && (
             <ClientesModule
               db={db}
@@ -958,6 +1092,12 @@ export default function App() {
           {section === 'gastos' && <GastosModule db={db} setDb={setDb} showToast={showToast} />}
           {section === 'reportes' && <ReportesModule db={db} />}
           {section === 'anticipos' && <AnticiposModule db={db} setDb={setDb} showToast={showToast} />}
+          {section === 'vacaciones' && (
+            <VacacionesModule db={db} settings={settings} setSettings={setSettings} showToast={showToast} />
+          )}
+          {section === 'proveedores' && (
+            <ProveedoresModule settings={settings} setSettings={setSettings} showToast={showToast} />
+          )}
           {section === 'config' && (
             <ConfigModule
               settings={settings}
@@ -969,6 +1109,7 @@ export default function App() {
             />
           )}
           {section !== 'dashboard' &&
+            section !== 'agenda' &&
             section !== 'clientes' &&
             section !== 'vehiculos' &&
             section !== 'inventario' &&
@@ -981,6 +1122,8 @@ export default function App() {
             section !== 'gastos' &&
             section !== 'reportes' &&
             section !== 'anticipos' &&
+            section !== 'vacaciones' &&
+            section !== 'proveedores' &&
             section !== 'config' && (
             <div className="card">
               <p>
