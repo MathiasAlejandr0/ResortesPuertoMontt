@@ -5,9 +5,19 @@ export type LineItem = {
   cat: string
   qty: number
   pu: number
+  /** Descuento por línea % (0–100), como en el HTML */
+  dto?: number
+  /** Neto tras dto, antes de IVA */
   sub: number
   libre?: boolean
+  /** IVA 19% sobre neto tras dto */
   iva?: boolean
+}
+
+/** Referencia compacta de mecánico en órdenes (multi-asignación, paridad HTML) */
+export type MecanicoRef = {
+  id: string
+  nombre: string
 }
 
 export type Cliente = {
@@ -55,6 +65,9 @@ export type Mecanico = {
   especialidad: string
   tel: string
   email: string
+  /** Opcional — remuneraciones / liquidaciones */
+  rut?: string
+  sueldoBase?: number
   activo: boolean
   creado: string
 }
@@ -90,8 +103,12 @@ export type Orden = {
   patente: string
   marca: string
   modelo: string
+  /** IDs separados por coma o primer id si hay varios */
   mecanicoId: string
+  /** Nombres para lista / PDF */
   mecanico: string
+  /** Lista explícita (persistida en Supabase como JSON) */
+  mecanicos?: MecanicoRef[]
   km: number
   diag: string
   obs: string
@@ -162,7 +179,7 @@ export type AnticipoRegistro = {
   mesDescuento: number
   anioDescuento: number
   desc: string
-  estado: 'Activo' | 'Pagado' | 'Anulado'
+  estado: 'Activo' | 'Pagado' | 'Anulado' | 'Pendiente'
   creado: string
 }
 
@@ -231,6 +248,30 @@ export type CompraProveedor = {
   creado: string
 }
 
+/** Cuota de crédito interno a mecánico (HTML cash_ts3 creditosMec) */
+export type CreditoMecCuota = {
+  mes: string
+  anio: number
+  fecha: string
+  monto: number
+  pagado: boolean
+  fechaPago: string | null
+}
+
+export type CreditoMec = {
+  id: string
+  mecanicoId: string
+  mecanicoNombre: string
+  monto: number
+  ncuotas: number
+  cuotaMonto: number
+  desc: string
+  saldo: number
+  cuotasPlan: CreditoMecCuota[]
+  estado: 'Activo' | 'Pagado'
+  creado: string
+}
+
 export type Db = {
   clientes: Cliente[]
   vehiculos: Vehiculo[]
@@ -252,6 +293,9 @@ export type AppExtras = {
   vacaciones: Vacacion[]
   proveedores: Proveedor[]
   compras: CompraProveedor[]
+  creditosMec: CreditoMec[]
+  /** Clave `${mecanicoId}_${mes}_${anio}` → comisión ajustada manualmente */
+  comisionesAjustadas: Record<string, number>
 }
 
 export type EmpresaConfig = {

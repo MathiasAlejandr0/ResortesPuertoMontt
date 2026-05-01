@@ -1,10 +1,11 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
 import type { Credito, Db, LineItem, Venta } from './appTypes'
+import { LineItemsEditor } from './LineItemsEditor'
 import {
+  calcTotalesLines,
   makeLineItem,
   matchClienteByName,
   nextFolio,
-  totalLineItems,
   UNIDADES_OPS,
   vehiculosFiltradosCliente,
 } from './opsHelpers'
@@ -78,8 +79,6 @@ export function VentasModule({ db, setDb, showToast }: Props) {
     setRowUni('Unidad')
   }
 
-  const quitarItem = (idx: number) => setItems((prev) => prev.filter((_, i) => i !== idx))
-
   const guardar = () => {
     const nom = clienteNom.trim()
     if (!nom) {
@@ -96,9 +95,9 @@ export function VentasModule({ db, setDb, showToast }: Props) {
     const clienteRut = m?.rut ?? ''
     const tel = m?.tel ?? ''
     const vh = vehId ? db.vehiculos.find((x) => x.id === vehId) : null
-    const bruto = totalLineItems(items)
     const desc = Math.max(0, descuento)
-    const total = Math.max(0, bruto - desc)
+    const rawDoc = calcTotalesLines(items).total
+    const total = Math.max(0, rawDoc - desc)
     const folio = nextFolio('VT', db)
     const v: Venta = {
       folio,
@@ -261,36 +260,17 @@ export function VentasModule({ db, setDb, showToast }: Props) {
           </div>
         </div>
 
+        <LineItemsEditor items={items} onChange={setItems} fmt={fmt} />
+
         {items.length > 0 && (
-          <div className="tw tw-items-preview">
-            <table>
-              <thead>
-                <tr>
-                  <th>Ítem</th>
-                  <th>Unidad</th>
-                  <th>Cant.</th>
-                  <th>P. unit.</th>
-                  <th>Subtotal</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it, idx) => (
-                  <tr key={`${it.nombre}-${idx}`}>
-                    <td>{it.nombre}</td>
-                    <td>{it.unidad}</td>
-                    <td>{it.qty}</td>
-                    <td>{fmt(it.pu)}</td>
-                    <td>{fmt(it.sub)}</td>
-                    <td>
-                      <button type="button" className="btn btn-xs btn-red" onClick={() => quitarItem(idx)}>
-                        Quitar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="venta-desc-global-hint">
+            <span>
+              Subtotal ítems: <strong>{fmt(calcTotalesLines(items).total)}</strong>
+            </span>
+            <span style={{ marginLeft: 12 }}>
+              A pagar (tras descuento global):{' '}
+              <strong>{fmt(Math.max(0, calcTotalesLines(items).total - Math.max(0, descuento)))}</strong>
+            </span>
           </div>
         )}
 

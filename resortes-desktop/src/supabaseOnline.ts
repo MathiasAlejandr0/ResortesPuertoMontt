@@ -1,8 +1,27 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { AppSettings, Db, LineItem } from './appTypes'
-import { normalizeCotizacion, normalizeOrden, normalizeVenta } from './opsHelpers'
+import type { AnticipoRegistro, AppSettings, Db, LineItem } from './appTypes'
+import {
+  normalizeCotizacion,
+  normalizeOrden,
+  normalizeVenta,
+  ordenMecanicosFromRow,
+  ordenMecanicosToRowFields,
+  ordenRefsForPersist,
+} from './opsHelpers'
 
-const defaultCats = ['Lubricantes', 'Repuestos', 'Fluidos', 'Herramientas', 'Mano de obra', 'Otros']
+/** Paridad con HTML `CATS_DEFAULT` */
+const defaultCats = [
+  'Lubricantes',
+  'Filtros',
+  'Frenos',
+  'Suspensión',
+  'Electricidad',
+  'Neumáticos',
+  'Mano de obra',
+  'Refrigeración',
+  'Transmisión',
+  'Otros',
+]
 
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10)
@@ -128,6 +147,8 @@ export async function loadOnlineDb(): Promise<Db | null> {
       especialidad: String(m.especialidad ?? ''),
       tel: String(m.tel ?? ''),
       email: String(m.email ?? ''),
+      rut: String(m.rut ?? ''),
+      sueldoBase: Number(m.sueldo_base ?? m.sueldoBase) || 0,
       activo: m.activo !== false,
       creado: String(m.creado ?? now),
     })),
@@ -151,8 +172,9 @@ export async function loadOnlineDb(): Promise<Db | null> {
         creado: String(c.creado ?? now),
       }),
     ),
-    ordenes: (ordenes.data ?? []).map((o: Record<string, unknown>) =>
-      normalizeOrden({
+    ordenes: (ordenes.data ?? []).map((o: Record<string, unknown>) => {
+      const mecanicosRow = ordenMecanicosFromRow(o)
+      return normalizeOrden({
         folio: String(o.folio),
         fechaIn: String(o.fecha_in ?? todayIsoDate()),
         fechaEst: String(o.fecha_est ?? ''),
@@ -164,6 +186,7 @@ export async function loadOnlineDb(): Promise<Db | null> {
         patente: String(o.patente ?? ''),
         marca: String(o.marca ?? ''),
         modelo: String(o.modelo ?? ''),
+        mecanicos: mecanicosRow.length ? mecanicosRow : undefined,
         mecanicoId: String(o.mecanico_id ?? ''),
         mecanico: String(o.mecanico ?? ''),
         km: Number(o.km) || 0,
@@ -174,8 +197,8 @@ export async function loadOnlineDb(): Promise<Db | null> {
         estado: String(o.estado ?? 'Recibido'),
         cotizacionOrigen: (o.cotizacion_origen as string | undefined) ?? undefined,
         creado: String(o.creado ?? now),
-      }),
-    ),
+      })
+    }),
     ventas: (ventas.data ?? []).map((v: Record<string, unknown>) =>
       normalizeVenta({
         folio: String(v.folio),
@@ -248,7 +271,9 @@ export async function loadOnlineDb(): Promise<Db | null> {
         mesDescuento: mes >= 0 && mes <= 11 ? mes : new Date().getMonth(),
         anioDescuento: Number(a.anio_descuento) || new Date().getFullYear(),
         desc: textDesc(a),
-        estado: (a.estado === 'Pagado' || a.estado === 'Anulado' ? a.estado : 'Activo') as 'Activo' | 'Pagado' | 'Anulado',
+        estado: (['Pagado', 'Anulado', 'Pendiente'].includes(String(a.estado))
+          ? String(a.estado)
+          : 'Activo') as AnticipoRegistro['estado'],
         creado: String(a.creado ?? now),
       }
     }),
@@ -312,7 +337,25 @@ export async function saveOnlineAll(db: Db, settings: AppSettings): Promise<bool
       )
     }
     if (db.inventario.length) ops.push(Promise.resolve(sb.from('inventario').insert(db.inventario)))
-    if (db.mecanicos.length) ops.push(Promise.resolve(sb.from('mecanicos').insert(db.mecanicos)))
+    if (db.mecanicos.length) {
+      ops.push(
+        Promise.resolve(
+          sb.from('mecanicos').insert(
+            db.mecanicos.map((m) => ({
+              id: m.id,
+              nombre: m.nombre,
+              especialidad: m.especialidad,
+              tel: m.tel,
+              email: m.email,
+              rut: m.rut ?? '',
+              sueldo_base: m.sueldoBase ?? 0,
+              activo: m.activo,
+              creado: m.creado,
+            })),
+          ),
+        ),
+      )
+    }
     if (db.cotizaciones.length) {
       ops.push(
         Promise.resolve(
@@ -343,29 +386,33 @@ export async function saveOnlineAll(db: Db, settings: AppSettings): Promise<bool
       ops.push(
         Promise.resolve(
           sb.from('ordenes').insert(
-            db.ordenes.map((o) => ({
-              folio: o.folio,
-              fecha_in: o.fechaIn,
-              fecha_est: o.fechaEst,
-              cliente_id: o.clienteId,
-              cliente_nombre: o.clienteNombre,
-              cliente_rut: o.clienteRut,
-              tel: o.tel,
-              vehiculo_id: o.vehiculoId,
-              patente: o.patente,
-              marca: o.marca,
-              modelo: o.modelo,
-              mecanico_id: o.mecanicoId,
-              mecanico: o.mecanico,
-              km: o.km,
-              diag: o.diag,
-              obs: o.obs,
-              items: o.items,
-              total: o.total,
-              estado: o.estado,
-              cotizacion_origen: o.cotizacionOrigen ?? null,
-              creado: o.creado,
-            })),
+            db.ordenes.map((o) => {
+              const mf = ordenMecanicosToRowFields(ordenRefsForPersist(o))
+              return {
+                folio: o.folio,
+                fecha_in: o.fechaIn,
+                fecha_est: o.fechaEst,
+                cliente_id: o.clienteId,
+                cliente_nombre: o.clienteNombre,
+                cliente_rut: o.clienteRut,
+                tel: o.tel,
+                vehiculo_id: o.vehiculoId,
+                patente: o.patente,
+                marca: o.marca,
+                modelo: o.modelo,
+                mecanico_id: mf.mecanico_id || o.mecanicoId,
+                mecanico: mf.mecanico || o.mecanico,
+                mecanicos: mf.mecanicos && mf.mecanicos.length ? mf.mecanicos : null,
+                km: o.km,
+                diag: o.diag,
+                obs: o.obs,
+                items: o.items,
+                total: o.total,
+                estado: o.estado,
+                cotizacion_origen: o.cotizacionOrigen ?? null,
+                creado: o.creado,
+              }
+            }),
           ),
         ),
       )

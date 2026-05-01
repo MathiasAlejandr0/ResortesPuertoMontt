@@ -37,6 +37,8 @@ export function defaultAppSettings(): AppSettings {
       vacaciones: [],
       proveedores: [],
       compras: [],
+      creditosMec: [],
+      comisionesAjustadas: {},
     },
   }
 }
@@ -61,6 +63,8 @@ export function loadAppSettings(): AppSettings {
           vacaciones: p.extras?.vacaciones ?? d.extras.vacaciones,
           proveedores: p.extras?.proveedores ?? d.extras.proveedores,
           compras: p.extras?.compras ?? d.extras.compras,
+          creditosMec: p.extras?.creditosMec ?? d.extras.creditosMec,
+          comisionesAjustadas: p.extras?.comisionesAjustadas ?? d.extras.comisionesAjustadas,
         },
       }
     }

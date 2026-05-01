@@ -9,9 +9,10 @@ import {
   useState,
 } from 'react'
 import * as XLSX from 'xlsx'
-import type { AppSettings, Db, Gasto, Vehiculo, Venta } from './appTypes'
+import type { AppSettings, Db, Vehiculo } from './appTypes'
 import { ConfigModule } from './ConfigModule'
 import { defaultAppSettings } from './appSettings'
+import { stashAnticiposNav } from './anticiposNav'
 import { AnticiposModule } from './AnticiposModule'
 import { CreditosModule } from './CreditosModule'
 import { GastosModule } from './GastosModule'
@@ -26,6 +27,9 @@ import { OrdenesModule } from './OrdenesModule'
 import { VentasModule } from './VentasModule'
 import { VacacionesModule } from './VacacionesModule'
 import { ProveedoresModule } from './ProveedoresModule'
+import { DashboardSection } from './DashboardSection'
+import type { Section } from './sections'
+import { anticipoDescuentaLiquidacion } from './remuneracionesHelpers'
 import { isSupabaseConfigured, loadOnlineDb, loadOnlineSettings, saveOnlineAll } from './supabaseOnline'
 import './App.css'
 
@@ -33,11 +37,6 @@ const LS_THEME = 'rpm_theme'
 const LS_PIN_ADMIN = 'rpm_pin_admin'
 const LS_PIN_VENDEDOR = 'rpm_pin_vendedor'
 
-const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-
-function fmt(n: number) {
-  return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
-}
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
@@ -45,7 +44,18 @@ function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-const defaultCats = ['Lubricantes', 'Repuestos', 'Fluidos', 'Herramientas', 'Mano de obra', 'Otros']
+const defaultCats = [
+  'Lubricantes',
+  'Filtros',
+  'Frenos',
+  'Suspensión',
+  'Electricidad',
+  'Neumáticos',
+  'Mano de obra',
+  'Refrigeración',
+  'Transmisión',
+  'Otros',
+]
 
 function emptyDb(): Db {
   return {
@@ -62,55 +72,6 @@ function emptyDb(): Db {
     anticipos: [],
   }
 }
-
-function ultimos6mesesVentas(ventas: Venta[]) {
-  const map: Record<string, number> = {}
-  ventas.forEach((v) => {
-    if (v.fecha) map[v.fecha.slice(0, 7)] = (map[v.fecha.slice(0, 7)] || 0) + v.total
-  })
-  const res: { label: string; value: number }[] = []
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date()
-    d.setMonth(d.getMonth() - i)
-    const k = d.toISOString().slice(0, 7)
-    res.push({ label: meses[d.getMonth()], value: map[k] || 0 })
-  }
-  return res
-}
-
-function ultimos6mesesGastos(gastos: Gasto[]) {
-  const map: Record<string, number> = {}
-  for (const g of gastos) {
-    if (g.fecha) map[g.fecha.slice(0, 7)] = (map[g.fecha.slice(0, 7)] || 0) + g.monto
-  }
-  const res: { label: string; value: number }[] = []
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date()
-    d.setMonth(d.getMonth() - i)
-    const k = d.toISOString().slice(0, 7)
-    res.push({ label: meses[d.getMonth()], value: map[k] || 0 })
-  }
-  return res
-}
-
-type Section =
-  | 'dashboard'
-  | 'agenda'
-  | 'clientes'
-  | 'vehiculos'
-  | 'inventario'
-  | 'mecanicos'
-  | 'cotizaciones'
-  | 'ordenes'
-  | 'ventas'
-  | 'informes'
-  | 'creditos'
-  | 'gastos'
-  | 'reportes'
-  | 'anticipos'
-  | 'vacaciones'
-  | 'proveedores'
-  | 'config'
 
 type UserRole = 'admin' | 'vendedor'
 
@@ -352,6 +313,16 @@ export default function App() {
     setTimeout(() => setToast(null), 3200)
   }
 
+  const irAnticiposCredito = useCallback((mecanicoId: string) => {
+    stashAnticiposNav({ tab: 'credMec', credMecId: mecanicoId })
+    setSection('anticipos')
+  }, [])
+
+  const irAnticiposNuevo = useCallback((mecanicoId: string) => {
+    stashAnticiposNav({ tab: 'nuevo', nuevoTrabajadorId: mecanicoId })
+    setSection('anticipos')
+  }, [])
+
   useEffect(() => {
     dbRef.current = db
   }, [db])
@@ -397,6 +368,9 @@ export default function App() {
             vacaciones: remoteSettings.extras?.vacaciones ?? defaultAppSettings().extras.vacaciones,
             proveedores: remoteSettings.extras?.proveedores ?? defaultAppSettings().extras.proveedores,
             compras: remoteSettings.extras?.compras ?? defaultAppSettings().extras.compras,
+            creditosMec: remoteSettings.extras?.creditosMec ?? defaultAppSettings().extras.creditosMec,
+            comisionesAjustadas:
+              remoteSettings.extras?.comisionesAjustadas ?? defaultAppSettings().extras.comisionesAjustadas,
           },
         })
       }
@@ -454,19 +428,27 @@ export default function App() {
     if (restrictedForSeller.includes(section)) setSection('dashboard')
   }, [role, restrictedForSeller, section])
 
-  const badgeCred = db.creditos.filter((c) => c.estado !== 'Pagado').length
+  const badgeCredVenc = useMemo(() => {
+    const h = today()
+    return db.creditos.filter((c) => c.estado !== 'Pagado' && c.vcto && c.vcto < h).length
+  }, [db.creditos])
+
+  const badgeCredNum =
+    badgeCredVenc > 0 ? badgeCredVenc : db.creditos.filter((c) => c.estado !== 'Pagado').length
+
   const badgeCot = db.cotizaciones.filter((c) => c.estado === 'Pendiente').length
 
-  const ingTotal = useMemo(() => db.ventas.reduce((s, v) => s + v.total, 0), [db.ventas])
-  const gasTotal = useMemo(() => db.gastos.reduce((s, g) => s + g.monto, 0), [db.gastos])
-  const porCobrar = useMemo(
-    () => db.creditos.filter((c) => c.estado !== 'Pagado').reduce((s, c) => s + c.saldo, 0),
-    [db.creditos],
+  const badgeAgenda = useMemo(() => {
+    const h = today()
+    const rec = settings.extras.agendaRecordatorios.filter((x) => x.estado !== 'completado' && x.fecha <= h).length
+    const res = settings.extras.agendaReservas.filter((x) => x.estado === 'pendiente' && x.fecha === h).length
+    return rec + res
+  }, [settings])
+
+  const badgeAnt = useMemo(
+    () => db.anticipos.filter((a) => anticipoDescuentaLiquidacion(a.estado)).length,
+    [db.anticipos],
   )
-  const ing6 = useMemo(() => ultimos6mesesVentas(db.ventas), [db.ventas])
-  const gas6 = useMemo(() => ultimos6mesesGastos(db.gastos), [db.gastos])
-  const maxBar = Math.max(...ing6.map((x) => x.value), ...gas6.map((x) => x.value), 1)
-  const activasOT = useMemo(() => db.ordenes.filter((o) => o.estado !== 'Entregado').slice(0, 8), [db.ordenes])
 
   const exportClientesExcel = () => {
     const rows = [['Nombre', 'RUT', 'Teléfono', 'Email', 'Dirección', 'Origen', 'Observaciones']]
@@ -491,9 +473,17 @@ export default function App() {
   }
 
   const exportMecanicosExcel = () => {
-    const rows: (string | number)[][] = [['Nombre', 'Especialidad', 'Teléfono', 'Email', 'Estado']]
+    const rows: (string | number)[][] = [['Nombre', 'RUT', 'Sueldo base', 'Especialidad', 'Teléfono', 'Email', 'Estado']]
     db.mecanicos.forEach((m) =>
-      rows.push([m.nombre, m.especialidad, m.tel, m.email, m.activo ? 'Activo' : 'Inactivo']),
+      rows.push([
+        m.nombre,
+        m.rut ?? '',
+        m.sueldoBase ?? 0,
+        m.especialidad,
+        m.tel,
+        m.email,
+        m.activo ? 'Activo' : 'Inactivo',
+      ]),
     )
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Mecánicos')
@@ -798,6 +788,7 @@ export default function App() {
           <button type="button" className={section === 'agenda' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('agenda')}>
             <span className="ni">📅</span>
             <span>Agenda</span>
+            {badgeAgenda > 0 && <span className="nav-badge">{badgeAgenda}</span>}
           </button>
           <div className="nav-group">Maestros</div>
           <button type="button" className={section === 'clientes' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('clientes')}>
@@ -839,7 +830,9 @@ export default function App() {
           <button type="button" className={section === 'creditos' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('creditos')}>
             <span className="ni">💳</span>
             <span>Cuentas por Cobrar</span>
-            {badgeCred > 0 && <span className="nav-badge">{badgeCred}</span>}
+            {badgeCredNum > 0 && (
+              <span className={`nav-badge${badgeCredVenc > 0 ? ' nav-badge-alert' : ''}`}>{badgeCredNum}</span>
+            )}
           </button>
           <button
             type="button"
@@ -865,8 +858,9 @@ export default function App() {
             onClick={() => !roleBlocked('anticipos') && setSection('anticipos')}
             disabled={roleBlocked('anticipos')}
           >
-            <span className="ni">📋</span>
+            <span className="ni">💼</span>
             <span>Anticipos / Préstamos</span>
+            {badgeAnt > 0 && <span className="nav-badge">{badgeAnt}</span>}
           </button>
           <button
             type="button"
@@ -985,81 +979,7 @@ export default function App() {
 
         <div className="content">
           {section === 'dashboard' && (
-            <>
-              <div className="stats">
-                <div className="stat">
-                  <div className="stat-lbl">Ingresos totales</div>
-                  <div className="stat-val">{fmt(ingTotal)}</div>
-                  <div className="stat-sub">acumulado ventas</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-lbl">Utilidad</div>
-                  <div className="stat-val" style={{ color: ingTotal - gasTotal >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                    {fmt(ingTotal - gasTotal)}
-                  </div>
-                </div>
-                <button type="button" className="stat stat-click" onClick={() => setSection('creditos')}>
-                  <div className="stat-lbl">Por cobrar</div>
-                  <div className="stat-val" style={{ color: 'var(--red)' }}>
-                    {fmt(porCobrar)}
-                  </div>
-                </button>
-                <div className="stat">
-                  <div className="stat-lbl">Órdenes activas</div>
-                  <div className="stat-val">{db.ordenes.filter((o) => o.estado !== 'Entregado').length}</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-lbl">Clientes</div>
-                  <div className="stat-val">{db.clientes.length}</div>
-                  <div className="stat-sub">{db.vehiculos.length} vehículos</div>
-                </div>
-              </div>
-              <div className="grid-2">
-                <div className="card">
-                  <div className="card-title">
-                    <div className="card-title-left">Ingresos por mes</div>
-                  </div>
-                  <div className="chart-bars">
-                    {ing6.map((d) => (
-                      <div key={d.label} className="chart-bar-wrap">
-                        <div className="chart-val">{d.value ? fmt(d.value) : ''}</div>
-                        <div className="chart-bar" style={{ height: `${Math.round((d.value / maxBar) * 160) || 2}px` }} />
-                        <div className="chart-lbl">{d.label}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="card">
-                  <div className="card-title">
-                    <div className="card-title-left">Órdenes activas</div>
-                  </div>
-                  {activasOT.length ? (
-                    <div className="tw">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>OT</th>
-                            <th>Cliente</th>
-                            <th>Estado</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {activasOT.map((o) => (
-                            <tr key={o.folio}>
-                              <td>{o.folio}</td>
-                              <td>{o.clienteNombre}</td>
-                              <td>{o.estado}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="empty">Sin órdenes activas</div>
-                  )}
-                </div>
-              </div>
-            </>
+            <DashboardSection db={db} settings={settings} setSection={setSection} />
           )}
           {section === 'agenda' && <AgendaModule settings={settings} setSettings={setSettings} showToast={showToast} />}
           {section === 'clientes' && (
@@ -1084,14 +1004,47 @@ export default function App() {
           )}
           {section === 'inventario' && <InventarioModule db={db} setDb={setDb} showToast={showToast} />}
           {section === 'mecanicos' && <MecanicosModule db={db} setDb={setDb} showToast={showToast} />}
-          {section === 'cotizaciones' && <CotizacionesModule db={db} setDb={setDb} showToast={showToast} />}
-          {section === 'ordenes' && <OrdenesModule db={db} setDb={setDb} showToast={showToast} />}
+          {section === 'cotizaciones' && (
+            <CotizacionesModule
+              db={db}
+              setDb={setDb}
+              settings={settings}
+              showToast={showToast}
+              onIrOrdenes={() => setSection('ordenes')}
+            />
+          )}
+          {section === 'ordenes' && (
+            <OrdenesModule
+              db={db}
+              setDb={setDb}
+              settings={settings}
+              showToast={showToast}
+              onIrCotizaciones={() => setSection('cotizaciones')}
+            />
+          )}
           {section === 'ventas' && <VentasModule db={db} setDb={setDb} showToast={showToast} />}
           {section === 'informes' && <InformesModule db={db} showToast={showToast} />}
           {section === 'creditos' && <CreditosModule db={db} setDb={setDb} showToast={showToast} />}
           {section === 'gastos' && <GastosModule db={db} setDb={setDb} showToast={showToast} />}
-          {section === 'reportes' && <ReportesModule db={db} />}
-          {section === 'anticipos' && <AnticiposModule db={db} setDb={setDb} showToast={showToast} />}
+          {section === 'reportes' && (
+            <ReportesModule
+              db={db}
+              settings={settings}
+              setSettings={setSettings}
+              showToast={showToast}
+              onIrAnticiposCredito={irAnticiposCredito}
+              onIrAnticiposNuevo={irAnticiposNuevo}
+            />
+          )}
+          {section === 'anticipos' && (
+            <AnticiposModule
+              db={db}
+              setDb={setDb}
+              settings={settings}
+              setSettings={setSettings}
+              showToast={showToast}
+            />
+          )}
           {section === 'vacaciones' && (
             <VacacionesModule db={db} settings={settings} setSettings={setSettings} showToast={showToast} />
           )}

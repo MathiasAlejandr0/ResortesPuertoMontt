@@ -15,12 +15,16 @@ export function MecanicosModule({ db, setDb, showToast }: Props) {
   const [buscar, setBuscar] = useState('')
   const [formKey, setFormKey] = useState(0)
 
+  const fmt = (n: number) =>
+    new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
+
   const lista = useMemo(() => {
     const q = buscar.toLowerCase().trim()
     if (!q) return db.mecanicos
     return db.mecanicos.filter(
       (m) =>
         m.nombre.toLowerCase().includes(q) ||
+        (m.rut || '').toLowerCase().includes(q) ||
         (m.especialidad || '').toLowerCase().includes(q) ||
         (m.tel || '').toLowerCase().includes(q) ||
         (m.email || '').toLowerCase().includes(q),
@@ -39,9 +43,11 @@ export function MecanicosModule({ db, setDb, showToast }: Props) {
     const nuevo: Mecanico = {
       id: uid(),
       nombre,
+      rut: String(fd.get('m_rut') || '').trim(),
       especialidad: String(fd.get('m_esp') || '').trim(),
       tel: String(fd.get('m_tel') || '').trim(),
       email: String(fd.get('m_email') || '').trim(),
+      sueldoBase: Number(fd.get('m_sueldo')) || 0,
       activo,
       creado: new Date().toISOString(),
     }
@@ -68,6 +74,14 @@ export function MecanicosModule({ db, setDb, showToast }: Props) {
           <div className="field">
             <label>Nombre completo *</label>
             <input name="m_nom" required placeholder="Juan Pérez" autoComplete="name" />
+          </div>
+          <div className="field">
+            <label>RUT</label>
+            <input name="m_rut" placeholder="12.345.678-9" autoComplete="off" />
+          </div>
+          <div className="field">
+            <label>Sueldo base ($)</label>
+            <input name="m_sueldo" type="number" min={0} step={1} placeholder="0" />
           </div>
           <div className="field">
             <label>Especialidad</label>
@@ -127,6 +141,8 @@ export function MecanicosModule({ db, setDb, showToast }: Props) {
               <thead>
                 <tr>
                   <th>Nombre</th>
+                  <th>RUT</th>
+                  <th>Sueldo base</th>
                   <th>Especialidad</th>
                   <th>Teléfono</th>
                   <th>Email</th>
@@ -138,6 +154,8 @@ export function MecanicosModule({ db, setDb, showToast }: Props) {
                 {lista.map((m) => (
                   <tr key={m.id}>
                     <td className="td-nombre">{m.nombre}</td>
+                    <td>{m.rut || '—'}</td>
+                    <td>{fmt(m.sueldoBase ?? 0)}</td>
                     <td>{m.especialidad || '—'}</td>
                     <td>{m.tel || '—'}</td>
                     <td>{m.email || '—'}</td>

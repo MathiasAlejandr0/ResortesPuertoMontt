@@ -1,23 +1,39 @@
-import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
-import type { Cotizacion, Db, LineItem } from './appTypes'
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from 'react'
+import type { AppSettings, Cotizacion, Db, LineItem, Orden } from './appTypes'
+import { printCotizacion } from './cotizacionPrint'
+import { LineItemsEditor } from './LineItemsEditor'
 import {
   makeLineItem,
   matchClienteByName,
   nextFolio,
-  totalLineItems,
+  normalizeLineItem,
+  ordenMecanicosToRowFields,
+  sumItemsConIva,
   UNIDADES_OPS,
   vehiculosFiltradosCliente,
 } from './opsHelpers'
+import { openWhatsAppUrl } from './whatsappOpen'
 
 type Props = {
   db: Db
   setDb: Dispatch<SetStateAction<Db>>
+  settings: AppSettings
   showToast: (msg: string, type?: 'ok' | 'err' | 'warn') => void
+  /** Al pulsar el vínculo a la OT generada */
+  onIrOrdenes?: () => void
 }
 
-const ESTADOS_COT = ['Pendiente', 'Aprobada', 'Rechazada', 'Convertida']
+const ESTADOS_COT = ['Pendiente', 'Aceptada', 'Rechazada', 'Convertida']
 
-export function CotizacionesModule({ db, setDb, showToast }: Props) {
+function statusPillClass(estado: string): string {
+  if (estado === 'Pendiente') return 'rpm-s-pendiente'
+  if (estado === 'Aceptada') return 'rpm-s-aceptada'
+  if (estado === 'Rechazada') return 'rpm-s-rechazada'
+  if (estado === 'Convertida') return 'rpm-s-convertida'
+  return 'rpm-s-pendiente'
+}
+
+export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes }: Props) {
   const [clienteNom, setClienteNom] = useState('')
   const [vehId, setVehId] = useState('')
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
@@ -29,6 +45,10 @@ export function CotizacionesModule({ db, setDb, showToast }: Props) {
   const [obs, setObs] = useState('')
   const [buscar, setBuscar] = useState('')
   const [estFiltro, setEstFiltro] = useState('')
+  const [expandedFolio, setExpandedFolio] = useState<string | null>(null)
+  const [addNom, setAddNom] = useState('')
+  const [addQty, setAddQty] = useState(1)
+  const [addPu, setAddPu] = useState(0)
 
   const clienteMatch = useMemo(() => matchClienteByName(db, clienteNom), [db, clienteNom])
   const vehOpts = useMemo(
@@ -44,12 +64,19 @@ export function CotizacionesModule({ db, setDb, showToast }: Props) {
         (c) =>
           c.folio.toLowerCase().includes(q) ||
           c.clienteNombre.toLowerCase().includes(q) ||
+          (c.clienteRut || '').toLowerCase().includes(q) ||
           (c.patente || '').toLowerCase().includes(q),
       )
     }
     if (estFiltro) rows = rows.filter((c) => c.estado === estFiltro)
     return rows
   }, [db.cotizaciones, buscar, estFiltro])
+
+  useEffect(() => {
+    setAddNom('')
+    setAddQty(1)
+    setAddPu(0)
+  }, [expandedFolio])
 
   const agregarItem = () => {
     const nombre = rowNom.trim()
@@ -68,10 +95,6 @@ export function CotizacionesModule({ db, setDb, showToast }: Props) {
     setRowUni('Unidad')
   }
 
-  const quitarItem = (idx: number) => {
-    setItems((prev) => prev.filter((_, i) => i !== idx))
-  }
-
   const guardar = () => {
     const nom = clienteNom.trim()
     if (!nom) {
@@ -88,7 +111,8 @@ export function CotizacionesModule({ db, setDb, showToast }: Props) {
     const clienteRut = m?.rut ?? ''
     const tel = m?.tel ?? ''
     const vh = vehId ? db.vehiculos.find((x) => x.id === vehId) : null
-    const total = totalLineItems(items)
+    const normalizedItems = items.map((x) => normalizeLineItem(x))
+    const total = sumItemsConIva(normalizedItems)
     const c: Cotizacion = {
       folio: nextFolio('COT', db),
       fecha,
@@ -100,7 +124,7 @@ export function CotizacionesModule({ db, setDb, showToast }: Props) {
       patente: vh?.patente ?? '',
       marca: vh?.marca ?? '',
       modelo: vh?.modelo ?? '',
-      items: [...items],
+      items: normalizedItems,
       total,
       obs: obs.trim(),
       estado: 'Pendiente',
@@ -130,11 +154,131 @@ export function CotizacionesModule({ db, setDb, showToast }: Props) {
   const eliminar = (folio: string) => {
     if (!window.confirm('¿Eliminar esta cotización?')) return
     setDb((d) => ({ ...d, cotizaciones: d.cotizaciones.filter((x) => x.folio !== folio) }))
+    if (expandedFolio === folio) setExpandedFolio(null)
     showToast('Cotización eliminada')
+  }
+
+  const patchEstado = (folio: string, estado: string) => {
+    setDb((d) => ({
+      ...d,
+      cotizaciones: d.cotizaciones.map((x) => (x.folio === folio ? { ...x, estado } : x)),
+    }))
+    showToast('Estado actualizado')
+  }
+
+  const patchCotItems = (folio: string, nextItems: LineItem[]) => {
+    const normalized = nextItems.map((x) => normalizeLineItem(x))
+    const total = sumItemsConIva(normalized)
+    setDb((d) => ({
+      ...d,
+      cotizaciones: d.cotizaciones.map((x) => (x.folio === folio ? { ...x, items: normalized, total } : x)),
+    }))
+  }
+
+  const patchCotObs = (folio: string, nextObs: string) => {
+    setDb((d) => ({
+      ...d,
+      cotizaciones: d.cotizaciones.map((x) => (x.folio === folio ? { ...x, obs: nextObs } : x)),
+    }))
+  }
+
+  const agregarItemGuardado = (folio: string) => {
+    const nombre = addNom.trim()
+    if (!nombre) {
+      showToast('Ingresa una descripción del ítem', 'warn')
+      return
+    }
+    const c = db.cotizaciones.find((x) => x.folio === folio)
+    if (!c) return
+    const inv = db.inventario.find(
+      (p) => p.nombre.toLowerCase() === nombre.toLowerCase() || p.codigo.toLowerCase() === nombre.toLowerCase(),
+    )
+    const cat = inv?.categoria || 'Servicios'
+    patchCotItems(folio, [...c.items, makeLineItem(nombre, 'Unidad', addQty, addPu, cat)])
+    setAddNom('')
+    setAddQty(1)
+    setAddPu(0)
+    showToast('Ítem agregado')
+  }
+
+  const convertirEnOt = (folio: string) => {
+    const cot = db.cotizaciones.find((x) => x.folio === folio)
+    if (!cot) return
+    if (cot.estado === 'Convertida') {
+      showToast('Ya fue convertida en orden de trabajo', 'warn')
+      return
+    }
+    if (!window.confirm(`¿Convertir cotización ${folio} en orden de trabajo?`)) return
+    const otFolio = nextFolio('OT', db)
+    const itemsNorm = cot.items.map((x) => normalizeLineItem(x))
+    const total = sumItemsConIva(itemsNorm)
+    const mf = ordenMecanicosToRowFields([])
+    const o: Orden = {
+      folio: otFolio,
+      fechaIn: new Date().toISOString().slice(0, 10),
+      fechaEst: '',
+      clienteId: cot.clienteId,
+      clienteNombre: cot.clienteNombre,
+      clienteRut: cot.clienteRut,
+      tel: cot.tel,
+      vehiculoId: cot.vehiculoId,
+      patente: cot.patente,
+      marca: cot.marca,
+      modelo: cot.modelo,
+      mecanicoId: mf.mecanico_id,
+      mecanico: mf.mecanico,
+      km: 0,
+      diag: cot.obs || '',
+      obs: '',
+      items: itemsNorm,
+      total,
+      estado: 'Recibido',
+      cotizacionOrigen: folio,
+      creado: new Date().toISOString(),
+    }
+    setDb((d) => ({
+      ...d,
+      ordenes: [o, ...d.ordenes],
+      cotizaciones: d.cotizaciones.map((x) =>
+        x.folio === folio ? { ...x, estado: 'Convertida', otFolio, items: itemsNorm, total } : x,
+      ),
+    }))
+    showToast(`Orden ${otFolio} creada desde ${folio}`)
+  }
+
+  const imprimirPdf = (folio: string) => {
+    const c = db.cotizaciones.find((x) => x.folio === folio)
+    if (!c) return
+    const v = c.vehiculoId ? db.vehiculos.find((x) => x.id === c.vehiculoId) ?? null : null
+    const ok = printCotizacion(settings, c, v)
+    if (!ok) showToast('El navegador bloqueó la ventana de impresión', 'warn')
+  }
+
+  const enviarWhatsapp = (folio: string) => {
+    const c = db.cotizaciones.find((x) => x.folio === folio)
+    if (!c) return
+    const taller = settings.empresa.nombre || 'El taller'
+    const validez = settings.pdf.validezCotDias || 30
+    const lines = c.items.slice(0, 5).map((i) => `• ${i.nombre} x${i.qty}`)
+    const more = c.items.length > 5 ? `\n• ...y ${c.items.length - 5} más` : ''
+    const msg =
+      `Hola ${c.clienteNombre}, te enviamos la cotización solicitada:\n\n` +
+      `📝 ${c.folio} — ${c.patente ? `${c.patente} ` : ''}\n` +
+      lines.join('\n') +
+      more +
+      `\n\n💰 Total: ${fmt(c.total)}\n` +
+      `⏳ Validez: ${validez} días\n\n` +
+      `¿Aceptas la cotización? ¡Cualquier consulta escríbenos! — ${taller}`
+    const ok = openWhatsAppUrl(c.tel || '', msg)
+    if (!ok) showToast('No hay teléfono válido para WhatsApp (revisa el cliente)', 'warn')
   }
 
   const fmt = (n: number) =>
     new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
+
+  const toggleExpand = (folio: string) => {
+    setExpandedFolio((prev) => (prev === folio ? null : folio))
+  }
 
   return (
     <>
@@ -223,38 +367,7 @@ export function CotizacionesModule({ db, setDb, showToast }: Props) {
           </button>
         </div>
 
-        {items.length > 0 && (
-          <div className="tw tw-items-preview">
-            <table>
-              <thead>
-                <tr>
-                  <th>Ítem</th>
-                  <th>Unidad</th>
-                  <th>Cant.</th>
-                  <th>P. unit.</th>
-                  <th>Subtotal</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it, idx) => (
-                  <tr key={`${it.nombre}-${idx}`}>
-                    <td>{it.nombre}</td>
-                    <td>{it.unidad}</td>
-                    <td>{it.qty}</td>
-                    <td>{fmt(it.pu)}</td>
-                    <td>{fmt(it.sub)}</td>
-                    <td>
-                      <button type="button" className="btn btn-xs btn-red" onClick={() => quitarItem(idx)}>
-                        Quitar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <LineItemsEditor items={items} onChange={setItems} fmt={fmt} />
 
         <div className="field field-full">
           <label>Notas / alcance del trabajo</label>
@@ -298,37 +411,128 @@ export function CotizacionesModule({ db, setDb, showToast }: Props) {
             <div>No hay cotizaciones</div>
           </div>
         ) : (
-          <div className="tw">
-            <table>
-              <thead>
-                <tr>
-                  <th>Folio</th>
-                  <th>Fecha</th>
-                  <th>Cliente</th>
-                  <th>Patente</th>
-                  <th>Total</th>
-                  <th>Estado</th>
-                  <th className="th-actions">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lista.map((c) => (
-                  <tr key={c.folio}>
-                    <td className="td-mono">{c.folio}</td>
-                    <td>{c.fecha}</td>
-                    <td>{c.clienteNombre}</td>
-                    <td>{c.patente || '—'}</td>
-                    <td>{fmt(c.total)}</td>
-                    <td>{c.estado}</td>
-                    <td>
-                      <button type="button" className="btn btn-xs btn-red" onClick={() => eliminar(c.folio)}>
-                        Eliminar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="lista-cots-exp">
+            {lista.map((c) => {
+              const open = expandedFolio === c.folio
+              return (
+                <div key={c.folio} className="exp-row">
+                  <button type="button" className="exp-hdr" onClick={() => toggleExpand(c.folio)}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span className="folio-cot">{c.folio}</span>
+                      <span style={{ fontWeight: 600 }}>{c.clienteNombre}</span>
+                      {c.clienteRut ? (
+                        <span style={{ fontSize: 11, color: 'var(--text2)' }}>{c.clienteRut}</span>
+                      ) : null}
+                      {c.patente ? (
+                        <span className="badge b-orange">{c.patente}</span>
+                      ) : null}
+                      <span className={`status-pill ${statusPillClass(c.estado)}`}>{c.estado}</span>
+                      {c.otFolio ? (
+                        <button
+                          type="button"
+                          className="folio-tag-link"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onIrOrdenes?.()
+                          }}
+                          title="Ir a órdenes de trabajo"
+                        >
+                          → {c.otFolio}
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="exp-hdr-meta">
+                      <div className="exp-hdr-meta-total">{fmt(c.total)}</div>
+                      <div className="exp-hdr-meta-sub">
+                        {c.fecha} · {c.items.length} ítem{c.items.length !== 1 ? 's' : ''}
+                      </div>
+                    </div>
+                  </button>
+                  {open ? (
+                    <div className="exp-body">
+                      {c.items.length === 0 ? (
+                        <div style={{ fontSize: 12, color: 'var(--text2)', margin: '10px 0' }}>
+                          Sin ítems en esta cotización. Usa «+ Agregar» más abajo.
+                        </div>
+                      ) : (
+                        <LineItemsEditor
+                          items={c.items}
+                          onChange={(next) => patchCotItems(c.folio, next)}
+                          fmt={fmt}
+                          columnLabels={{ item: 'PRODUCTO', totalLine: 'SUBTOTAL' }}
+                          ivaToggle="badge"
+                          compactRemove
+                        />
+                      )}
+                      <div className="cot-add-inline">
+                        <input
+                          className="cot-add-inline-grow"
+                          placeholder="Descripción del ítem"
+                          value={addNom}
+                          onChange={(e) => setAddNom(e.target.value)}
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          style={{ width: 72 }}
+                          value={addQty}
+                          onChange={(e) => setAddQty(Number(e.target.value))}
+                          title="Cantidad"
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          style={{ width: 96 }}
+                          placeholder="Precio"
+                          value={addPu || ''}
+                          onChange={(e) => setAddPu(Number(e.target.value))}
+                        />
+                        <button type="button" className="btn btn-xs btn-primary" onClick={() => agregarItemGuardado(c.folio)}>
+                          + Agregar
+                        </button>
+                      </div>
+                      <div className="field field-full cot-notes-block">
+                        <label>Notas / alcance</label>
+                        <textarea
+                          rows={3}
+                          value={c.obs}
+                          onChange={(e) => patchCotObs(c.folio, e.target.value)}
+                          placeholder="Notas visibles en PDF y al convertir en OT..."
+                        />
+                      </div>
+                      <div className="cot-exp-actions">
+                        <button type="button" className="btn btn-xs btn-outline" onClick={() => imprimirPdf(c.folio)}>
+                          🖨 PDF
+                        </button>
+                        <button type="button" className="btn btn-xs btn-green" onClick={() => enviarWhatsapp(c.folio)}>
+                          💬 WhatsApp
+                        </button>
+                        {c.estado === 'Pendiente' ? (
+                          <>
+                            <button type="button" className="btn btn-xs btn-green" onClick={() => patchEstado(c.folio, 'Aceptada')}>
+                              ✓ Aceptada
+                            </button>
+                            <button type="button" className="btn btn-xs btn-red" onClick={() => patchEstado(c.folio, 'Rechazada')}>
+                              ✕ Rechazada
+                            </button>
+                          </>
+                        ) : null}
+                        {c.estado !== 'Convertida' && c.estado !== 'Rechazada' ? (
+                          <button type="button" className="btn btn-xs btn-primary" onClick={() => convertirEnOt(c.folio)}>
+                            → Convertir en OT
+                          </button>
+                        ) : null}
+                        <button type="button" className="btn btn-xs btn-red" onClick={() => eliminar(c.folio)}>
+                          🗑 Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
