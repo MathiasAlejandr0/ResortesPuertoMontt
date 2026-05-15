@@ -1,5 +1,12 @@
 import type { AppSettings, Orden, Vehiculo } from './appTypes'
-import { fmtIsoDate, fmtMoney, RPM_BRAND_PRINT } from './anticiposComprobantePrint'
+import {
+  fmtMoney,
+  PRINT_FONT_IMPORT_CSS,
+  PRINT_FONT_MONO_STACK,
+  PRINT_FONT_SANS_STACK,
+  RPM_BRAND_PRINT,
+} from './anticiposComprobantePrint'
+import { fmtIsoDate } from './dateFormat'
 import { lineIvaAmt, lineSubNeto } from './opsHelpers'
 
 function escapeHtml(s: string) {
@@ -12,9 +19,10 @@ function escapeHtml(s: string) {
 
 function dosCopiasHtml(inner: string): string {
   return `<style>
+    ${PRINT_FONT_IMPORT_CSS}
     @page{margin:10mm;size:auto}
     .copia-sep{page-break-after:always;break-after:page}
-    .copia-label{font-size:9px;color:#aaa;text-align:right;padding:3px 0 0;font-family:Segoe UI,Arial,sans-serif}
+    .copia-label{font-size:9px;color:#aaa;text-align:right;padding:3px 0 0;font-family:${PRINT_FONT_SANS_STACK}}
   </style>
   <div class="copia-sep">
     <div class="copia-label">Copia 1 de 2</div>
@@ -61,10 +69,21 @@ export function buildOrdenPrintInnerHtml(settings: AppSettings, o: Orden, vehicu
   const ivaSummary =
     ivaTot > 0
       ? `<div style="display:flex;justify-content:flex-end;gap:16px;margin-top:8px;font-size:11px;color:#666">
-      <span>Neto: <strong style="font-family:monospace">${fmtMoney(neto)}</strong></span>
-      <span style="color:#2a5a2a">IVA: <strong style="font-family:monospace">+${fmtMoney(ivaTot)}</strong></span>
+      <span>Neto: <strong style="font-family:${PRINT_FONT_MONO_STACK}">${fmtMoney(neto)}</strong></span>
+      <span style="color:#2a5a2a">IVA: <strong style="font-family:${PRINT_FONT_MONO_STACK}">+${fmtMoney(ivaTot)}</strong></span>
     </div>`
       : ''
+
+  const dtoGlob = Math.max(0, Number(o.descuento) || 0)
+  const dtoLine =
+    dtoGlob > 0
+      ? `<div style="display:flex;justify-content:flex-end;margin-top:10px;font-size:12px;color:#8a3030;font-weight:600">
+      Descuento: <span style="font-family:${PRINT_FONT_MONO_STACK};margin-left:8px">−${fmtMoney(dtoGlob)}</span>
+    </div>`
+      : ''
+  const totalLbl =
+    (dtoGlob > 0 ? 'Total orden — descuento aplicado' : 'Total de la orden') +
+    (o.items.some((i) => i.iva) ? ' (IVA incluido)' : '')
 
   const diagHtml = o.diag
     ? `<div class="sec-hdr">Diagnóstico / trabajo solicitado</div><div class="obs-box">${escapeHtml(o.diag)}</div>`
@@ -74,14 +93,31 @@ export function buildOrdenPrintInnerHtml(settings: AppSettings, o: Orden, vehicu
     ? `<div class="obs-box"><strong>Observaciones:</strong> ${escapeHtml(o.obs)}</div>`
     : ''
 
+  const docOtHtml =
+    o.docTipo || o.docFolio || o.docFecha || (o.docMonto != null && Number(o.docMonto) > 0)
+      ? `<div class="sec-hdr">Documento tributario (OT)</div>
+    <div class="info-grid">
+      ${o.docTipo ? `<div class="info-row"><span class="info-lbl">Tipo:</span><span class="info-val">${escapeHtml(o.docTipo)}</span></div>` : ''}
+      ${o.docFolio ? `<div class="info-row"><span class="info-lbl">Folio:</span><span class="info-val">${escapeHtml(o.docFolio)}</span></div>` : ''}
+      ${o.docFecha ? `<div class="info-row"><span class="info-lbl">Fecha:</span><span class="info-val">${escapeHtml(fmtIsoDate(o.docFecha))}</span></div>` : ''}
+      ${o.docMonto != null && Number(o.docMonto) > 0 ? `<div class="info-row"><span class="info-lbl">Monto:</span><span class="info-val">${fmtMoney(Number(o.docMonto))}</span></div>` : ''}
+    </div>`
+      : ''
+
+  const imgsOtHint =
+    o.imgs?.length && o.imgs.length > 0
+      ? `<div style="font-size:10px;color:#666;margin-top:10px;padding:8px 12px;background:#f7f7f7;border-radius:5px;border:1px solid #e8e8e8">📷 Esta orden incluye <strong>${o.imgs.length}</strong> foto(s) de ingreso en el sistema digital.</div>`
+      : ''
+
   const kmFmt =
     o.km != null && Number(o.km) > 0
       ? new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(Number(o.km))
       : ''
 
   return `<style>
+    ${PRINT_FONT_IMPORT_CSS}
     *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    body,div,p,td,th,span{font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:${B.text};line-height:1.5}
+    body,div,p,td,th,span{font-family:${PRINT_FONT_SANS_STACK};font-size:12px;color:${B.text};line-height:1.5}
     .doc{max-width:700px;margin:0 auto}
     .hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:14px;border-bottom:2.5px solid ${B.accentDark};margin-bottom:18px}
     .co-logo{height:52px;max-width:110px;object-fit:contain;display:block;margin-bottom:6px}
@@ -89,7 +125,7 @@ export function buildOrdenPrintInnerHtml(settings: AppSettings, o: Orden, vehicu
     .co-info{font-size:10px;color:${B.muted};margin-top:2px}
     .doc-folio{text-align:right}
     .doc-folio .tipo{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#888}
-    .doc-folio .num{font-size:22px;font-weight:700;color:${accentOt};font-family:monospace}
+    .doc-folio .num{font-size:22px;font-weight:700;color:${accentOt};font-family:${PRINT_FONT_MONO_STACK}}
     .doc-folio .meta{font-size:10px;color:${B.muted};margin-top:3px}
     .sec-hdr{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin:16px 0 6px;padding-bottom:3px;border-bottom:1px solid #ddd}
     .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px 24px}
@@ -104,7 +140,7 @@ export function buildOrdenPrintInnerHtml(settings: AppSettings, o: Orden, vehicu
     tr:nth-child(even) td{background:#f9f9f9}
     .total-box{background:${accentOt};color:#fff;border-radius:8px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;margin-top:14px}
     .total-box .lbl{font-size:11px;opacity:.7}
-    .total-box .amt{font-size:22px;font-weight:700;font-family:monospace}
+    .total-box .amt{font-size:22px;font-weight:700;font-family:${PRINT_FONT_MONO_STACK}}
     .obs-box{background:#f5f4f0;border-radius:5px;padding:10px 14px;font-size:11px;color:#555;margin-top:10px}
     .pie-txt{font-size:10px;color:#888;background:#f0ede8;border-radius:5px;padding:8px 12px;margin-top:10px}
     .firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:30px}
@@ -150,10 +186,13 @@ export function buildOrdenPrintInnerHtml(settings: AppSettings, o: Orden, vehicu
     </div>
   </div>
   ${diagHtml}
+  ${docOtHtml}
+  ${imgsOtHint}
   <div class="sec-hdr">Detalle de servicios y repuestos</div>
   <table><thead><tr><th>#</th><th>Descripción</th><th>Cantidad</th><th>Unidad</th><th class="tr">IVA</th></tr></thead><tbody>${rows}</tbody></table>
   ${ivaSummary}
-  <div class="total-box"><div><div class="lbl">Total de la orden${o.items.some((i) => i.iva) ? ' (IVA incluido)' : ''}</div></div><div class="amt">${fmtMoney(o.total)}</div></div>
+  ${dtoLine}
+  <div class="total-box"><div><div class="lbl">${totalLbl}</div></div><div class="amt">${fmtMoney(o.total)}</div></div>
   ${obsHtml}
   <div style="background:#FDF3E0;border:1px solid #E0C070;border-radius:6px;padding:10px 14px;margin-top:10px;font-size:10px;color:#7A4F10">
     <strong>Aviso:</strong> Los precios son referenciales y pueden variar durante el diagnóstico. Cualquier cambio será informado antes de proceder.

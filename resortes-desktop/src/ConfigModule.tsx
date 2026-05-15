@@ -1,6 +1,9 @@
 import { type ChangeEvent, type Dispatch, type SetStateAction, useRef } from 'react'
 import type { AppSettings, Db } from './appTypes'
-import { defaultAppSettings } from './appSettings'
+import { normalizeDbGastos } from './gastosCategoria'
+import { mergeImportedAppSettings } from './appSettings'
+import { legacyHtmlBackupToDesktop } from './migrateHtmlBackup'
+import { firestoreDatosToDesktop } from './migrateFirestoreDatos'
 
 const TIPOS_CUENTA = ['Corriente', 'Vista', 'Cuenta RUT', 'Otro']
 
@@ -137,25 +140,45 @@ export function ConfigModule({ settings, setSettings, db, setDb, emptyDb, showTo
     const r = new FileReader()
     r.onload = () => {
       try {
-        const data = JSON.parse(String(r.result)) as { db?: Db; settings?: AppSettings }
-        if (!data.db) {
-          showToast('El archivo no contiene datos válidos', 'err')
+        const raw = JSON.parse(String(r.result)) as unknown
+        const data = raw as { db?: Db; settings?: AppSettings }
+
+        let dbPayload: Db | undefined = data.db
+        let settingsPayload: AppSettings | undefined = data.settings
+        let cloudSource: 'desktop' | 'firestore_doc' | 'html_v3' = 'desktop'
+
+        if (!dbPayload) {
+          const fsImp = firestoreDatosToDesktop(raw)
+          if (fsImp) {
+            dbPayload = fsImp.db
+            settingsPayload = fsImp.settings
+            cloudSource = 'firestore_doc'
+          }
+        }
+        if (!dbPayload) {
+          const legacy = legacyHtmlBackupToDesktop(raw)
+          if (legacy) {
+            dbPayload = legacy.db
+            settingsPayload = legacy.settings
+            cloudSource = 'html_v3'
+          }
+        }
+
+        if (!dbPayload) {
+          showToast(
+            'Archivo no reconocido: usa backup del escritorio, JSON HTML v3 o export Firestore taller/datos',
+            'err',
+          )
           return
         }
         if (!window.confirm('Se reemplazarán todos los datos actuales. ¿Continuar?')) return
-        setDb(data.db)
-        if (data.settings) {
-          const merged = {
-            ...defaultAppSettings(),
-            ...data.settings,
-            empresa: { ...defaultAppSettings().empresa, ...data.settings.empresa },
-            banco: { ...defaultAppSettings().banco, ...data.settings.banco },
-            pdf: { ...defaultAppSettings().pdf, ...data.settings.pdf },
-            logoDataUrl: data.settings.logoDataUrl ?? null,
-          }
-          setSettings(merged)
-        }
-        showToast('Backup importado (se guardará en Supabase al sincronizar)')
+        setDb(normalizeDbGastos(dbPayload))
+        setSettings(mergeImportedAppSettings(settingsPayload))
+        const syncHint = 'Se guardará en Supabase al sincronizar.'
+        if (data.db) showToast(`Backup del escritorio importado (${syncHint})`)
+        else if (cloudSource === 'firestore_doc')
+          showToast(`Copia Firebase/Firestore (documento datos) importada (${syncHint})`)
+        else showToast(`Backup HTML v3 importado (${syncHint})`)
       } catch {
         showToast('No se pudo leer el archivo', 'err')
       }
@@ -414,7 +437,12 @@ export function ConfigModule({ settings, setSettings, db, setDb, emptyDb, showTo
           </button>
         </div>
         <p className="cfg-backup-foot">
-          El backup incluye todos los datos y configuración. Guárdalo en un lugar seguro.
+          Backup escritorio: <code className="cfg-code-inline">db</code> +{' '}
+          <code className="cfg-code-inline">settings</code>. HTML v3:{' '}
+          <code className="cfg-code-inline">version &quot;3.0&quot;</code> +{' '}
+          <code className="cfg-code-inline">taller</code>. Firebase: JSON del documento Firestore{' '}
+          <code className="cfg-code-inline">taller/datos</code> (campos <code className="cfg-code-inline">_cfg</code>,{' '}
+          <code className="cfg-code-inline">clientes</code>, etc.).
         </p>
       </div>
     </>

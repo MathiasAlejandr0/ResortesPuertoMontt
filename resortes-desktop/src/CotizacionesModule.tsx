@@ -3,15 +3,18 @@ import type { AppSettings, Cotizacion, Db, LineItem, Orden } from './appTypes'
 import { printCotizacion } from './cotizacionPrint'
 import { LineItemsEditor } from './LineItemsEditor'
 import {
+  inventarioCoincidenciaExacta,
   makeLineItem,
   matchClienteByName,
   nextFolio,
   normalizeLineItem,
   ordenMecanicosToRowFields,
-  sumItemsConIva,
+  precioUnitDesdeInvOlibre,
+  totalDocumentoConDescuento,
   UNIDADES_OPS,
   vehiculosFiltradosCliente,
 } from './opsHelpers'
+import { isoDateToDdMmYyyy } from './dateFormat'
 import { openWhatsAppUrl } from './whatsappOpen'
 
 type Props = {
@@ -49,6 +52,9 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
   const [addNom, setAddNom] = useState('')
   const [addQty, setAddQty] = useState(1)
   const [addPu, setAddPu] = useState(0)
+  const [descuento, setDescuento] = useState(0)
+  const [stepTrabajoOpen, setStepTrabajoOpen] = useState(false)
+  const [stepCierreOpen, setStepCierreOpen] = useState(false)
 
   const clienteMatch = useMemo(() => matchClienteByName(db, clienteNom), [db, clienteNom])
   const vehOpts = useMemo(
@@ -72,11 +78,26 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
     return rows
   }, [db.cotizaciones, buscar, estFiltro])
 
+  const fmt = (n: number) =>
+    new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
+
   useEffect(() => {
     setAddNom('')
     setAddQty(1)
     setAddPu(0)
   }, [expandedFolio])
+
+  useEffect(() => {
+    try {
+      const g = sessionStorage.getItem('rpm-global-filter')
+      if (g) {
+        setBuscar(g)
+        sessionStorage.removeItem('rpm-global-filter')
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   const agregarItem = () => {
     const nombre = rowNom.trim()
@@ -84,11 +105,14 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
       showToast('Indica producto o servicio', 'warn')
       return
     }
-    const inv = db.inventario.find(
-      (p) => p.nombre.toLowerCase() === nombre.toLowerCase() || p.codigo.toLowerCase() === nombre.toLowerCase(),
-    )
+    const inv = inventarioCoincidenciaExacta(db, nombre)
     const cat = inv?.categoria || 'Servicios'
-    setItems((prev) => [...prev, makeLineItem(nombre, rowUni, rowQty, rowPu, cat)])
+    const pu = precioUnitDesdeInvOlibre(inv, rowPu)
+    const base = makeLineItem(nombre, rowUni, rowQty, pu, cat)
+    const line = inv
+      ? normalizeLineItem({ ...base, pid: inv.id, libre: false, unidad: inv.unidad || base.unidad })
+      : normalizeLineItem(base)
+    setItems((prev) => [...prev, line])
     setRowNom('')
     setRowQty(1)
     setRowPu(0)
@@ -112,7 +136,8 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
     const tel = m?.tel ?? ''
     const vh = vehId ? db.vehiculos.find((x) => x.id === vehId) : null
     const normalizedItems = items.map((x) => normalizeLineItem(x))
-    const total = sumItemsConIva(normalizedItems)
+    const desc = Math.max(0, descuento)
+    const total = totalDocumentoConDescuento(normalizedItems, desc)
     const c: Cotizacion = {
       folio: nextFolio('COT', db),
       fecha,
@@ -125,6 +150,7 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
       marca: vh?.marca ?? '',
       modelo: vh?.modelo ?? '',
       items: normalizedItems,
+      descuento: desc,
       total,
       obs: obs.trim(),
       estado: 'Pendiente',
@@ -137,6 +163,9 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
     setFecha(new Date().toISOString().slice(0, 10))
     setItems([])
     setObs('')
+    setDescuento(0)
+    setStepTrabajoOpen(false)
+    setStepCierreOpen(false)
   }
 
   const limpiar = () => {
@@ -149,6 +178,9 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
     setRowQty(1)
     setRowPu(0)
     setObs('')
+    setDescuento(0)
+    setStepTrabajoOpen(false)
+    setStepCierreOpen(false)
   }
 
   const eliminar = (folio: string) => {
@@ -167,11 +199,27 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
   }
 
   const patchCotItems = (folio: string, nextItems: LineItem[]) => {
-    const normalized = nextItems.map((x) => normalizeLineItem(x))
-    const total = sumItemsConIva(normalized)
     setDb((d) => ({
       ...d,
-      cotizaciones: d.cotizaciones.map((x) => (x.folio === folio ? { ...x, items: normalized, total } : x)),
+      cotizaciones: d.cotizaciones.map((x) => {
+        if (x.folio !== folio) return x
+        const normalized = nextItems.map((y) => normalizeLineItem(y))
+        const desc = Math.max(0, Number(x.descuento) || 0)
+        const total = totalDocumentoConDescuento(normalized, desc)
+        return { ...x, items: normalized, total }
+      }),
+    }))
+  }
+
+  const patchCotDescuento = (folio: string, raw: number) => {
+    const desc = Math.max(0, raw)
+    setDb((d) => ({
+      ...d,
+      cotizaciones: d.cotizaciones.map((x) => {
+        if (x.folio !== folio) return x
+        const total = totalDocumentoConDescuento(x.items, desc)
+        return { ...x, descuento: desc, total }
+      }),
     }))
   }
 
@@ -190,11 +238,14 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
     }
     const c = db.cotizaciones.find((x) => x.folio === folio)
     if (!c) return
-    const inv = db.inventario.find(
-      (p) => p.nombre.toLowerCase() === nombre.toLowerCase() || p.codigo.toLowerCase() === nombre.toLowerCase(),
-    )
+    const inv = inventarioCoincidenciaExacta(db, nombre)
     const cat = inv?.categoria || 'Servicios'
-    patchCotItems(folio, [...c.items, makeLineItem(nombre, 'Unidad', addQty, addPu, cat)])
+    const pu = precioUnitDesdeInvOlibre(inv, addPu)
+    const base = makeLineItem(nombre, 'Unidad', addQty, pu, cat)
+    const line = inv
+      ? normalizeLineItem({ ...base, pid: inv.id, libre: false, unidad: inv.unidad || base.unidad })
+      : normalizeLineItem(base)
+    patchCotItems(folio, [...c.items, line])
     setAddNom('')
     setAddQty(1)
     setAddPu(0)
@@ -211,7 +262,8 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
     if (!window.confirm(`¿Convertir cotización ${folio} en orden de trabajo?`)) return
     const otFolio = nextFolio('OT', db)
     const itemsNorm = cot.items.map((x) => normalizeLineItem(x))
-    const total = sumItemsConIva(itemsNorm)
+    const desc = Math.max(0, Number(cot.descuento) || 0)
+    const total = totalDocumentoConDescuento(itemsNorm, desc)
     const mf = ordenMecanicosToRowFields([])
     const o: Orden = {
       folio: otFolio,
@@ -231,6 +283,7 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
       diag: cot.obs || '',
       obs: '',
       items: itemsNorm,
+      descuento: desc,
       total,
       estado: 'Recibido',
       cotizacionOrigen: folio,
@@ -240,10 +293,14 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
       ...d,
       ordenes: [o, ...d.ordenes],
       cotizaciones: d.cotizaciones.map((x) =>
-        x.folio === folio ? { ...x, estado: 'Convertida', otFolio, items: itemsNorm, total } : x,
+        x.folio === folio ? { ...x, estado: 'Convertida', otFolio, items: itemsNorm, descuento: desc, total } : x,
       ),
     }))
-    showToast(`Orden ${otFolio} creada desde ${folio}`)
+    showToast(
+      desc > 0
+        ? `Orden ${otFolio} creada desde ${folio}. Descuento ${fmt(desc)} transferido`
+        : `Orden ${otFolio} creada desde ${folio}`,
+    )
   }
 
   const imprimirPdf = (folio: string) => {
@@ -273,9 +330,6 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
     if (!ok) showToast('No hay teléfono válido para WhatsApp (revisa el cliente)', 'warn')
   }
 
-  const fmt = (n: number) =>
-    new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
-
   const toggleExpand = (folio: string) => {
     setExpandedFolio((prev) => (prev === folio ? null : folio))
   }
@@ -286,95 +340,152 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
         <div className="card-title">
           <div className="card-title-left">Nueva cotización</div>
         </div>
-        <div className="g3 form-ops-row1">
-          <div className="field">
-            <label>Cliente — busca o ingresa libre</label>
-            <input
-              list="lista-clientes-cot"
-              placeholder="Nombre del cliente..."
-              value={clienteNom}
-              onChange={(e) => {
-                setClienteNom(e.target.value)
-                setVehId('')
-              }}
-            />
-            <datalist id="lista-clientes-cot">
-              {db.clientes.map((c) => (
-                <option key={c.id} value={c.nombre} />
-              ))}
-            </datalist>
+
+        <div className="rpm-step rpm-step--cot1 rpm-step-open">
+          <div className="rpm-step-head">
+            <span className="rpm-step-num">1</span>
+            <div>
+              <div className="rpm-step-title">Cliente y vehículo</div>
+              <div className="rpm-step-sub muted">Quién cotiza y para qué unidad</div>
+            </div>
           </div>
-          <div className="field">
-            <label>Vehículo</label>
-            <select value={vehId} onChange={(e) => setVehId(e.target.value)}>
-              <option value="">— Seleccionar —</option>
-              {vehOpts.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.patente} — {v.marca} {v.modelo}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Fecha</label>
-            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          <div className="rpm-step-body">
+            <div className="g3 form-ops-row1">
+              <div className="field">
+                <label>Cliente — busca o ingresa libre</label>
+                <input
+                  list="lista-clientes-cot"
+                  placeholder="Nombre del cliente..."
+                  value={clienteNom}
+                  onChange={(e) => {
+                    setClienteNom(e.target.value)
+                    setVehId('')
+                  }}
+                />
+                <datalist id="lista-clientes-cot">
+                  {db.clientes.map((c) => (
+                    <option key={c.id} value={c.nombre} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="field">
+                <label>Vehículo</label>
+                <select value={vehId} onChange={(e) => setVehId(e.target.value)}>
+                  <option value="">— Seleccionar —</option>
+                  {vehOpts.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.patente} — {v.marca} {v.modelo}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Fecha</label>
+                <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="g4-items">
-          <div className="field">
-            <label>Producto / servicio — escribe para buscar o ingresar libre</label>
-            <input
-              list="lista-inv-cot"
-              placeholder="Ej: Aceite motor, Revisión frenos..."
-              value={rowNom}
-              onChange={(e) => setRowNom(e.target.value)}
-            />
-            <datalist id="lista-inv-cot">
-              {db.inventario.map((p) => (
-                <option key={p.id} value={p.nombre} />
-              ))}
-            </datalist>
+        <button
+          type="button"
+          className={`rpm-step-toggle rpm-step--cot2${stepTrabajoOpen ? ' is-open' : ''}`}
+          onClick={() => setStepTrabajoOpen((o) => !o)}
+        >
+          <span className="rpm-step-num">2</span>
+          <div className="rpm-step-toggle-text">
+            <span className="rpm-step-title">Ítems cotizados</span>
+            <span className="rpm-step-sub muted">repuestos · mano de obra · IVA</span>
           </div>
-          <div className="field">
-            <label>Unidad</label>
-            <select value={rowUni} onChange={(e) => setRowUni(e.target.value)}>
-              {UNIDADES_OPS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
-              ))}
-            </select>
+          <span className="rpm-step-chevron" aria-hidden>
+            {stepTrabajoOpen ? '▼' : '▶'}
+          </span>
+        </button>
+        {stepTrabajoOpen ? (
+          <div className="rpm-step-body rpm-step-body-nested">
+            <div className="g4-items">
+              <div className="field">
+                <label>Producto / servicio — escribe para buscar o ingresar libre</label>
+                <input
+                  list="lista-inv-cot"
+                  placeholder="Ej: Aceite motor, Revisión frenos..."
+                  value={rowNom}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setRowNom(v)
+                    const inv = inventarioCoincidenciaExacta(db, v)
+                    if (!inv) return
+                    setRowPu(Math.max(0, Number(inv.precio) || 0))
+                    const u = String(inv.unidad ?? '').trim()
+                    if (u && UNIDADES_OPS.includes(u)) setRowUni(u)
+                  }}
+                />
+                <datalist id="lista-inv-cot">
+                  {db.inventario.map((p) => (
+                    <option key={p.id} value={p.nombre} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="field">
+                <label>Unidad</label>
+                <select value={rowUni} onChange={(e) => setRowUni(e.target.value)}>
+                  {UNIDADES_OPS.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Cantidad</label>
+                <input type="number" min={0} step={1} value={rowQty} onChange={(e) => setRowQty(Number(e.target.value))} />
+              </div>
+              <div className="field">
+                <label>P. unit. ($) editable</label>
+                <input type="number" min={0} step={1} value={rowPu} onChange={(e) => setRowPu(Number(e.target.value))} />
+              </div>
+            </div>
+            <div className="form-ops-add-row">
+              <button type="button" className="btn btn-agregar-item" onClick={agregarItem}>
+                + Agregar ítem
+              </button>
+            </div>
+            <LineItemsEditor items={items} onChange={setItems} fmt={fmt} />
+            <div className="field" style={{ maxWidth: 280 }}>
+              <label>Descuento global ($)</label>
+              <input type="number" min={0} step={1} value={descuento} onChange={(e) => setDescuento(Number(e.target.value))} />
+            </div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              A pagar:{' '}
+              <strong>{fmt(totalDocumentoConDescuento(items.map((x) => normalizeLineItem(x)), descuento))}</strong>
+            </p>
           </div>
-          <div className="field">
-            <label>Cantidad</label>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={rowQty}
-              onChange={(e) => setRowQty(Number(e.target.value))}
-            />
-          </div>
-          <div className="field">
-            <label>P. unit. ($) editable</label>
-            <input type="number" min={0} step={1} value={rowPu} onChange={(e) => setRowPu(Number(e.target.value))} />
-          </div>
-        </div>
-        <div className="form-ops-add-row">
-          <button type="button" className="btn btn-agregar-item" onClick={agregarItem}>
-            + Agregar ítem
-          </button>
-        </div>
+        ) : null}
 
-        <LineItemsEditor items={items} onChange={setItems} fmt={fmt} />
+        <button
+          type="button"
+          className={`rpm-step-toggle rpm-step--cot3${stepCierreOpen ? ' is-open' : ''}`}
+          onClick={() => setStepCierreOpen((o) => !o)}
+        >
+          <span className="rpm-step-num">3</span>
+          <div className="rpm-step-toggle-text">
+            <span className="rpm-step-title">Notas y guardar</span>
+            <span className="rpm-step-sub muted">alcance · condiciones</span>
+          </div>
+          <span className="rpm-step-chevron" aria-hidden>
+            {stepCierreOpen ? '▼' : '▶'}
+          </span>
+        </button>
+        {stepCierreOpen ? (
+          <div className="rpm-step-body rpm-step-body-nested">
+            <div className="field field-full">
+              <label>Notas / alcance del trabajo</label>
+              <textarea rows={4} placeholder="Describe el trabajo, condiciones, garantías..." value={obs} onChange={(e) => setObs(e.target.value)} />
+            </div>
+          </div>
+        ) : null}
 
-        <div className="field field-full">
-          <label>Notas / alcance del trabajo</label>
-          <textarea rows={4} placeholder="Describe el trabajo, condiciones, garantías..." value={obs} onChange={(e) => setObs(e.target.value)} />
-        </div>
-
-        <div className="form-row-actions">
+        <div className="form-row-actions" style={{ marginTop: 14 }}>
           <button type="button" className="btn btn-purple" onClick={guardar}>
             ✓ Guardar cotización
           </button>
@@ -444,7 +555,7 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
                     <div className="exp-hdr-meta">
                       <div className="exp-hdr-meta-total">{fmt(c.total)}</div>
                       <div className="exp-hdr-meta-sub">
-                        {c.fecha} · {c.items.length} ítem{c.items.length !== 1 ? 's' : ''}
+                        {isoDateToDdMmYyyy(c.fecha)} · {c.items.length} ítem{c.items.length !== 1 ? 's' : ''}
                       </div>
                     </div>
                   </button>
@@ -469,7 +580,12 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
                           className="cot-add-inline-grow"
                           placeholder="Descripción del ítem"
                           value={addNom}
-                          onChange={(e) => setAddNom(e.target.value)}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            setAddNom(v)
+                            const inv = inventarioCoincidenciaExacta(db, v)
+                            if (inv) setAddPu(Math.max(0, Number(inv.precio) || 0))
+                          }}
                         />
                         <input
                           type="number"
@@ -500,6 +616,16 @@ export function CotizacionesModule({ db, setDb, settings, showToast, onIrOrdenes
                           value={c.obs}
                           onChange={(e) => patchCotObs(c.folio, e.target.value)}
                           placeholder="Notas visibles en PDF y al convertir en OT..."
+                        />
+                      </div>
+                      <div className="field" style={{ maxWidth: 280 }}>
+                        <label>Descuento global ($)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={c.descuento ?? 0}
+                          onChange={(e) => patchCotDescuento(c.folio, Number(e.target.value))}
                         />
                       </div>
                       <div className="cot-exp-actions">

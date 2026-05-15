@@ -1,17 +1,22 @@
-import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from 'react'
+import { type Dispatch, type SetStateAction, Fragment, useEffect, useMemo, useState } from 'react'
 import type { AppSettings, Credito, Db, LineItem, Orden, Venta } from './appTypes'
 import { LineItemsEditor } from './LineItemsEditor'
 import { printOrden } from './ordenPrint'
 import {
+  inventarioCoincidenciaExacta,
   makeLineItem,
   matchClienteByName,
+  mecanicoEnNomina,
   nextFolio,
   normalizeLineItem,
   ordenMecanicosToRowFields,
-  sumItemsConIva,
+  precioUnitDesdeInvOlibre,
+  totalDocumentoConDescuento,
   UNIDADES_OPS,
   vehiculosFiltradosCliente,
 } from './opsHelpers'
+import { isoDateToDdMmYyyy } from './dateFormat'
+import { humanBytes, openDocumentoAdjunto, pickDocumentoAdjunto } from './documentoAdjunto'
 import { openWhatsAppUrl } from './whatsappOpen'
 
 type Props = {
@@ -23,7 +28,7 @@ type Props = {
 }
 
 const ESTADOS_OT = ['Recibido', 'En proceso', 'Listo', 'Entregado']
-const FPAGO_OT = ['Contado', 'Transferencia', 'Tarjeta', 'Crédito']
+const FPAGO_OT = ['Contado', 'Transferencia', 'Débito', 'Crédito', 'Cheque', 'Otro']
 
 function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
@@ -78,6 +83,12 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
   const [ventaOtFolio, setVentaOtFolio] = useState<string | null>(null)
   const [ventaFpago, setVentaFpago] = useState('Contado')
   const [ventaFecha, setVentaFecha] = useState(() => new Date().toISOString().slice(0, 10))
+  const [ventaChequeNumero, setVentaChequeNumero] = useState('')
+  const [ventaChequeBanco, setVentaChequeBanco] = useState('')
+  const [ventaChequeFechaCobro, setVentaChequeFechaCobro] = useState('')
+  const [descuentoOt, setDescuentoOt] = useState(0)
+  const [stepTrabajoOpen, setStepTrabajoOpen] = useState(false)
+  const [stepCierreOpen, setStepCierreOpen] = useState(false)
 
   const previewFolio = useMemo(() => nextFolio('OT', db), [db])
   const hoy = new Date().toISOString().slice(0, 10)
@@ -88,7 +99,7 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
     [db, clienteMatch],
   )
 
-  const mecanicosActivos = useMemo(() => db.mecanicos.filter((m) => m.activo), [db.mecanicos])
+  const mecanicosActivos = useMemo(() => db.mecanicos.filter(mecanicoEnNomina), [db.mecanicos])
 
   const lista = useMemo(() => {
     let rows = [...db.ordenes].sort((a, b) => (a.creado < b.creado ? 1 : -1))
@@ -109,16 +120,60 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
     return rows
   }, [db.ordenes, buscar, estFiltro, hoy])
 
+  const listaActivas = useMemo(() => lista.filter((o) => o.estado !== 'Entregado'), [lista])
+  const listaEntregadas = useMemo(() => lista.filter((o) => o.estado === 'Entregado'), [lista])
+  const listaGrouped = useMemo(() => [...listaActivas, ...listaEntregadas], [listaActivas, listaEntregadas])
+
   useEffect(() => {
     setAddNom('')
     setAddQty(1)
     setAddPu(0)
   }, [expandedFolio])
 
+  /** Desde vista rápida de cliente (sessionStorage `rpm-expand-ot`) */
+  useEffect(() => {
+    let folio: string | null = null
+    try {
+      folio = sessionStorage.getItem('rpm-expand-ot')
+    } catch {
+      /* ignore */
+    }
+    if (!folio) return
+    if (!db.ordenes.some((o) => o.folio === folio)) {
+      try {
+        sessionStorage.removeItem('rpm-expand-ot')
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    setExpandedFolio(folio)
+    try {
+      sessionStorage.removeItem('rpm-expand-ot')
+    } catch {
+      /* ignore */
+    }
+  }, [db.ordenes])
+
+  useEffect(() => {
+    try {
+      const g = sessionStorage.getItem('rpm-global-filter')
+      if (g) {
+        setBuscar(g)
+        sessionStorage.removeItem('rpm-global-filter')
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
   useEffect(() => {
     if (ventaOtFolio) {
       setVentaFpago('Contado')
       setVentaFecha(new Date().toISOString().slice(0, 10))
+      setVentaChequeNumero('')
+      setVentaChequeBanco('')
+      setVentaChequeFechaCobro('')
     }
   }, [ventaOtFolio])
 
@@ -128,11 +183,14 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
       showToast('Indica producto o servicio', 'warn')
       return
     }
-    const inv = db.inventario.find(
-      (p) => p.nombre.toLowerCase() === nombre.toLowerCase() || p.codigo.toLowerCase() === nombre.toLowerCase(),
-    )
+    const inv = inventarioCoincidenciaExacta(db, nombre)
     const cat = inv?.categoria || 'Servicios'
-    setItems((prev) => [...prev, makeLineItem(nombre, rowUni, rowQty, rowPu, cat)])
+    const pu = precioUnitDesdeInvOlibre(inv, rowPu)
+    const base = makeLineItem(nombre, rowUni, rowQty, pu, cat)
+    const line = inv
+      ? normalizeLineItem({ ...base, pid: inv.id, libre: false, unidad: inv.unidad || base.unidad })
+      : normalizeLineItem(base)
+    setItems((prev) => [...prev, line])
     setRowNom('')
     setRowQty(1)
     setRowPu(0)
@@ -159,7 +217,8 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
       .map((m) => ({ id: m!.id, nombre: m!.nombre }))
     const mf = ordenMecanicosToRowFields(mecs)
     const itemsNorm = items.map((x) => normalizeLineItem(x))
-    const total = sumItemsConIva(itemsNorm)
+    const desc = Math.max(0, descuentoOt)
+    const total = totalDocumentoConDescuento(itemsNorm, desc)
     const o: Orden = {
       folio: nextFolio('OT', db),
       fechaIn,
@@ -179,6 +238,7 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
       diag: diag.trim(),
       obs: obs.trim(),
       items: itemsNorm,
+      descuento: desc,
       total,
       estado: estadoOt,
       creado: new Date().toISOString(),
@@ -195,6 +255,9 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
     setDiag('')
     setItems([])
     setObs('')
+    setDescuentoOt(0)
+    setStepTrabajoOpen(false)
+    setStepCierreOpen(false)
   }
 
   const limpiar = () => {
@@ -212,6 +275,9 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
     setRowQty(1)
     setRowPu(0)
     setObs('')
+    setDescuentoOt(0)
+    setStepTrabajoOpen(false)
+    setStepCierreOpen(false)
   }
 
   const eliminar = (folio: string) => {
@@ -222,18 +288,64 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
   }
 
   const patchOtItems = (folio: string, nextItems: LineItem[]) => {
-    const normalized = nextItems.map((x) => normalizeLineItem(x))
-    const total = sumItemsConIva(normalized)
     setDb((d) => ({
       ...d,
-      ordenes: d.ordenes.map((x) => (x.folio === folio ? { ...x, items: normalized, total } : x)),
+      ordenes: d.ordenes.map((x) => {
+        if (x.folio !== folio) return x
+        const normalized = nextItems.map((y) => normalizeLineItem(y))
+        const desc = Math.max(0, Number(x.descuento) || 0)
+        const total = totalDocumentoConDescuento(normalized, desc)
+        return { ...x, items: normalized, total }
+      }),
     }))
   }
 
-  const patchOt = (folio: string, patch: Partial<Pick<Orden, 'diag' | 'obs' | 'estado' | 'fechaEst' | 'fechaIn' | 'km'>>) => {
+  type OtHeadPatch = Partial<
+    Pick<
+      Orden,
+      | 'diag'
+      | 'obs'
+      | 'estado'
+      | 'fechaEst'
+      | 'fechaIn'
+      | 'km'
+      | 'docTipo'
+      | 'docFolio'
+      | 'docFecha'
+      | 'docMonto'
+      | 'docAdjNombre'
+      | 'docAdjMime'
+      | 'docAdjDataUrl'
+      | 'docAdjSize'
+      | 'descuento'
+    >
+  >
+
+  const patchOt = (folio: string, patch: OtHeadPatch) => {
     setDb((d) => ({
       ...d,
-      ordenes: d.ordenes.map((x) => (x.folio === folio ? { ...x, ...patch } : x)),
+      ordenes: d.ordenes.map((x) => {
+        if (x.folio !== folio) return x
+        let next: Orden = { ...x, ...patch }
+        if (patch.descuento !== undefined) {
+          const desc = Math.max(0, Number(patch.descuento) || 0)
+          next = { ...next, descuento: desc, total: totalDocumentoConDescuento(next.items, desc) }
+        }
+        if (patch.docTipo !== undefined && !String(patch.docTipo).trim()) {
+          next = {
+            ...next,
+            docTipo: undefined,
+            docFolio: undefined,
+            docFecha: undefined,
+            docMonto: undefined,
+            docAdjNombre: undefined,
+            docAdjMime: undefined,
+            docAdjDataUrl: undefined,
+            docAdjSize: undefined,
+          }
+        }
+        return next
+      }),
     }))
   }
 
@@ -245,11 +357,14 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
     }
     const o = db.ordenes.find((x) => x.folio === folio)
     if (!o) return
-    const inv = db.inventario.find(
-      (p) => p.nombre.toLowerCase() === nombre.toLowerCase() || p.codigo.toLowerCase() === nombre.toLowerCase(),
-    )
+    const inv = inventarioCoincidenciaExacta(db, nombre)
     const cat = inv?.categoria || 'Servicios'
-    patchOtItems(folio, [...o.items, makeLineItem(nombre, 'Unidad', addQty, addPu, cat)])
+    const pu = precioUnitDesdeInvOlibre(inv, addPu)
+    const base = makeLineItem(nombre, 'Unidad', addQty, pu, cat)
+    const line = inv
+      ? normalizeLineItem({ ...base, pid: inv.id, libre: false, unidad: inv.unidad || base.unidad })
+      : normalizeLineItem(base)
+    patchOtItems(folio, [...o.items, line])
     setAddNom('')
     setAddQty(1)
     setAddPu(0)
@@ -280,7 +395,7 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
       msg =
         `Hola ${o.clienteNombre}, tu vehículo ${pat}se encuentra en proceso de reparación.\n\n` +
         `📋 Orden: ${o.folio}\n` +
-        (o.fechaEst ? `📅 Fecha estimada de entrega: ${o.fechaEst}\n` : '') +
+        (o.fechaEst ? `📅 Fecha estimada de entrega: ${isoDateToDdMmYyyy(o.fechaEst)}\n` : '') +
         `\nCualquier consulta estamos a tu disposición. — ${taller}`
     } else {
       msg =
@@ -310,11 +425,17 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
       setVentaOtFolio(null)
       return
     }
+    if (ventaFpago === 'Cheque') {
+      if (!ventaChequeNumero.trim()) return showToast('Falta N° de cheque', 'err')
+      if (!ventaChequeBanco.trim()) return showToast('Falta banco emisor', 'err')
+      if (!ventaChequeFechaCobro.trim()) return showToast('Falta fecha de cobro', 'err')
+    }
     setDb((d) => {
       const orden = d.ordenes.find((x) => x.folio === ventaOtFolio)
       if (!orden) return d
       const itemsNorm = orden.items.map((x) => normalizeLineItem(x))
-      const total = sumItemsConIva(itemsNorm)
+      const descV = Math.max(0, Number(orden.descuento) || 0)
+      const total = totalDocumentoConDescuento(itemsNorm, descV)
       const vFolio = nextFolio('VT', d)
       const venta: Venta = {
         folio: vFolio,
@@ -329,9 +450,12 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
         modelo: orden.modelo,
         mecanico: orden.mecanico,
         items: itemsNorm,
-        descuento: 0,
+        descuento: descV,
         total,
         fpago: ventaFpago,
+        chequeNumero: ventaFpago === 'Cheque' ? ventaChequeNumero.trim() : undefined,
+        chequeBanco: ventaFpago === 'Cheque' ? ventaChequeBanco.trim() : undefined,
+        chequeFechaCobro: ventaFpago === 'Cheque' ? ventaChequeFechaCobro.trim().slice(0, 10) : undefined,
         obs: (orden.obs || orden.diag || '').trim(),
         otOrigen: orden.folio,
         cotOrigen: orden.cotizacionOrigen,
@@ -347,7 +471,7 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
         )
       }
       let creditos = d.creditos
-      if (ventaFpago === 'Crédito' && total > 0) {
+      if ((ventaFpago === 'Crédito' || ventaFpago === 'Cheque') && total > 0) {
         const cr: Credito = {
           id: uid(),
           clienteId: orden.clienteId,
@@ -357,8 +481,13 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
           saldo: total,
           abonos: [],
           fecha: venta.fecha,
-          vcto: '',
-          desc: `Venta ${vFolio} (OT: ${orden.folio})`,
+          vcto: ventaFpago === 'Cheque' ? ventaChequeFechaCobro.trim().slice(0, 10) : '',
+          desc: `${ventaFpago === 'Cheque' ? 'Cheque' : 'Crédito'} venta ${vFolio} (OT: ${orden.folio})`,
+          tipo: ventaFpago === 'Cheque' ? 'cheque' : 'credito',
+          chequeNumero: ventaFpago === 'Cheque' ? ventaChequeNumero.trim() : undefined,
+          chequeBanco: ventaFpago === 'Cheque' ? ventaChequeBanco.trim() : undefined,
+          chequeFechaCobro: ventaFpago === 'Cheque' ? ventaChequeFechaCobro.trim().slice(0, 10) : undefined,
+          chequeEstado: ventaFpago === 'Cheque' ? 'Pendiente' : undefined,
           ventaFolio: vFolio,
           estado: 'Pendiente',
           creado: new Date().toISOString(),
@@ -366,7 +495,7 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
         creditos = [cr, ...creditos]
       }
       const ordenes = d.ordenes.map((x) =>
-        x.folio === orden.folio ? { ...x, estado: 'Entregado', items: itemsNorm, total } : x,
+        x.folio === orden.folio ? { ...x, estado: 'Entregado', items: itemsNorm, descuento: descV, total } : x,
       )
       return {
         ...d,
@@ -376,10 +505,24 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
         ordenes,
       }
     })
-    showToast(
-      ventaFpago === 'Crédito' ? 'Venta registrada en crédito — revisa Cuentas por cobrar' : `Venta registrada (${ventaFpago})`,
-    )
+    showToast(ventaFpago === 'Crédito' || ventaFpago === 'Cheque' ? 'Venta registrada en Cuentas por cobrar' : `Venta registrada (${ventaFpago})`)
     setVentaOtFolio(null)
+  }
+
+  const onPickAdjuntoOt = async (folio: string, file: File | undefined | null) => {
+    if (!file) return
+    try {
+      const parsed = await pickDocumentoAdjunto(file)
+      patchOt(folio, {
+        docAdjNombre: parsed.nombre,
+        docAdjMime: parsed.mime,
+        docAdjDataUrl: parsed.dataUrl,
+        docAdjSize: parsed.size,
+      })
+      showToast('Adjunto cargado')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo adjuntar', 'err')
+    }
   }
 
   const fmt = (n: number) =>
@@ -394,141 +537,201 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
           <div className="card-title-left">Nueva orden de trabajo</div>
         </div>
 
-        <div className="g4-ot-row1">
-          <div className="field">
-            <label>Cliente — busca o ingresa libre</label>
-            <input
-              list="lista-clientes-ot"
-              placeholder="Nombre del cliente..."
-              value={clienteNom}
-              onChange={(e) => {
-                setClienteNom(e.target.value)
-                setVehId('')
-              }}
-            />
-            <datalist id="lista-clientes-ot">
-              {db.clientes.map((c) => (
-                <option key={c.id} value={c.nombre} />
-              ))}
-            </datalist>
-          </div>
-          <div className="field">
-            <label>Vehículo *</label>
-            <select value={vehId} onChange={(e) => onPickVeh(e.target.value)} required>
-              <option value="">— Seleccionar —</option>
-              {vehOpts.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.patente} — {v.marca} {v.modelo}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field field-span-mec">
-            <label>Mecánicos asignados (varios)</label>
-            <div className="mec-picker">
-              {mecanicosActivos.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  className={selectedMecIds.includes(m.id) ? 'mec-chip on' : 'mec-chip'}
-                  onClick={() =>
-                    setSelectedMecIds((prev) =>
-                      prev.includes(m.id) ? prev.filter((x) => x !== m.id) : [...prev, m.id],
-                    )
-                  }
-                >
-                  {m.nombre}
-                </button>
-              ))}
-              {!mecanicosActivos.length ? <span style={{ fontSize: 12, color: 'var(--text2)' }}>Sin mecánicos activos</span> : null}
+        <div className="rpm-step rpm-step--ot1 rpm-step-open">
+          <div className="rpm-step-head">
+            <span className="rpm-step-num">1</span>
+            <div>
+              <div className="rpm-step-title">Recepción del vehículo</div>
+              <div className="rpm-step-sub muted">Cliente · vehículo · fechas · estado</div>
             </div>
           </div>
-          <div className="field">
-            <label>Fecha ingreso</label>
-            <input type="date" value={fechaIn} onChange={(e) => setFechaIn(e.target.value)} />
+          <div className="rpm-step-body">
+            <div className="g4-ot-row1">
+              <div className="field">
+                <label>Cliente — busca o ingresa libre</label>
+                <input
+                  list="lista-clientes-ot"
+                  placeholder="Nombre del cliente..."
+                  value={clienteNom}
+                  onChange={(e) => {
+                    setClienteNom(e.target.value)
+                    setVehId('')
+                  }}
+                />
+                <datalist id="lista-clientes-ot">
+                  {db.clientes.map((c) => (
+                    <option key={c.id} value={c.nombre} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="field">
+                <label>Vehículo *</label>
+                <select value={vehId} onChange={(e) => onPickVeh(e.target.value)} required>
+                  <option value="">— Seleccionar —</option>
+                  {vehOpts.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.patente} — {v.marca} {v.modelo}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Km ingreso</label>
+                <input type="number" min={0} step={1} placeholder="km actuales" value={km || ''} onChange={(e) => setKm(Number(e.target.value))} />
+              </div>
+              <div className="field">
+                <label>Fecha ingreso</label>
+                <input type="date" value={fechaIn} onChange={(e) => setFechaIn(e.target.value)} />
+              </div>
+            </div>
+            <div className="g4-ot-row2">
+              <div className="field">
+                <label>Fecha estimada</label>
+                <input type="date" value={fechaEst} onChange={(e) => setFechaEst(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Estado</label>
+                <select value={estadoOt} onChange={(e) => setEstadoOt(e.target.value)}>
+                  {ESTADOS_OT.map((e) => (
+                    <option key={e} value={e}>
+                      {e}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>N° OT</label>
+                <input readOnly className="input-readonly" value={previewFolio} />
+              </div>
+              <div className="field" aria-hidden />
+            </div>
           </div>
         </div>
 
-        <div className="g4-ot-row2">
-          <div className="field">
-            <label>Fecha entrega estimada</label>
-            <input type="date" value={fechaEst} onChange={(e) => setFechaEst(e.target.value)} />
+        <button
+          type="button"
+          className={`rpm-step-toggle rpm-step--ot2${stepTrabajoOpen ? ' is-open' : ''}`}
+          onClick={() => setStepTrabajoOpen((v) => !v)}
+        >
+          <span className="rpm-step-num">2</span>
+          <div className="rpm-step-toggle-text">
+            <span className="rpm-step-title">Diagnóstico y trabajo</span>
+            <span className="rpm-step-sub muted">mecánicos · diagnóstico · repuestos</span>
           </div>
-          <div className="field">
-            <label>Kilometraje ingreso</label>
-            <input type="number" min={0} step={1} placeholder="km actuales" value={km || ''} onChange={(e) => setKm(Number(e.target.value))} />
+          <span className="rpm-step-chevron" aria-hidden>
+            {stepTrabajoOpen ? '▼' : '▶'}
+          </span>
+        </button>
+        {stepTrabajoOpen ? (
+          <div className="rpm-step-body rpm-step-body-nested">
+            <div className="field field-span-mec field-full">
+              <label>Mecánicos asignados (varios)</label>
+              <div className="mec-picker">
+                {mecanicosActivos.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className={selectedMecIds.includes(m.id) ? 'mec-chip on' : 'mec-chip'}
+                    onClick={() =>
+                      setSelectedMecIds((prev) =>
+                        prev.includes(m.id) ? prev.filter((x) => x !== m.id) : [...prev, m.id],
+                      )
+                    }
+                  >
+                    {m.nombre}
+                  </button>
+                ))}
+                {!mecanicosActivos.length ? <span style={{ fontSize: 12, color: 'var(--text2)' }}>Sin mecánicos activos</span> : null}
+              </div>
+            </div>
+            <div className="field field-full">
+              <label>Diagnóstico / trabajo solicitado</label>
+              <textarea rows={3} placeholder="Descripción del problema o trabajo a realizar.." value={diag} onChange={(e) => setDiag(e.target.value)} />
+            </div>
+            <div className="sub-seccion-ot">Repuestos y mano de obra</div>
+            <div className="g4-items">
+              <div className="field">
+                <label>Producto / servicio</label>
+                <input
+                  list="lista-inv-ot"
+                  placeholder="Ej: Aceite motor, Cambio frenos..."
+                  value={rowNom}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setRowNom(v)
+                    const inv = inventarioCoincidenciaExacta(db, v)
+                    if (!inv) return
+                    setRowPu(Math.max(0, Number(inv.precio) || 0))
+                    const u = String(inv.unidad ?? '').trim()
+                    if (u && UNIDADES_OPS.includes(u)) setRowUni(u)
+                  }}
+                />
+                <datalist id="lista-inv-ot">
+                  {db.inventario.map((p) => (
+                    <option key={p.id} value={p.nombre} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="field">
+                <label>Unidad</label>
+                <select value={rowUni} onChange={(e) => setRowUni(e.target.value)}>
+                  {UNIDADES_OPS.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Cantidad</label>
+                <input type="number" min={0} step={1} value={rowQty} onChange={(e) => setRowQty(Number(e.target.value))} />
+              </div>
+              <div className="field">
+                <label>P. unit. ($) editable</label>
+                <input type="number" min={0} step={1} value={rowPu} onChange={(e) => setRowPu(Number(e.target.value))} />
+              </div>
+            </div>
+            <div className="form-ops-add-row">
+              <button type="button" className="btn btn-agregar-item" onClick={agregarItem}>
+                + Agregar ítem
+              </button>
+            </div>
+            <LineItemsEditor items={items} onChange={setItems} fmt={fmt} />
+            <div className="field" style={{ maxWidth: 280 }}>
+              <label>Descuento global ($)</label>
+              <input type="number" min={0} step={1} value={descuentoOt} onChange={(e) => setDescuentoOt(Number(e.target.value))} />
+            </div>
+            <p className="muted" style={{ fontSize: 12 }}>
+              Total estimado:{' '}
+              <strong>{fmt(totalDocumentoConDescuento(items.map((x) => normalizeLineItem(x)), descuentoOt))}</strong>
+            </p>
           </div>
-          <div className="field">
-            <label>Estado</label>
-            <select value={estadoOt} onChange={(e) => setEstadoOt(e.target.value)}>
-              {ESTADOS_OT.map((e) => (
-                <option key={e} value={e}>
-                  {e}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>N° orden</label>
-            <input readOnly className="input-readonly" value={previewFolio} />
-          </div>
-        </div>
+        ) : null}
 
-        <div className="field field-full">
-          <label>Diagnóstico / trabajo solicitado</label>
-          <textarea rows={3} placeholder="Descripción del problema o trabajo a realizar.." value={diag} onChange={(e) => setDiag(e.target.value)} />
-        </div>
-
-        <div className="sub-seccion-ot">Repuestos y mano de obra</div>
-
-        <div className="g4-items">
-          <div className="field">
-            <label>Producto / servicio</label>
-            <input
-              list="lista-inv-ot"
-              placeholder="Ej: Aceite motor, Cambio frenos..."
-              value={rowNom}
-              onChange={(e) => setRowNom(e.target.value)}
-            />
-            <datalist id="lista-inv-ot">
-              {db.inventario.map((p) => (
-                <option key={p.id} value={p.nombre} />
-              ))}
-            </datalist>
+        <button
+          type="button"
+          className={`rpm-step-toggle rpm-step--ot3${stepCierreOpen ? ' is-open' : ''}`}
+          onClick={() => setStepCierreOpen((v) => !v)}
+        >
+          <span className="rpm-step-num">3</span>
+          <div className="rpm-step-toggle-text">
+            <span className="rpm-step-title">Cierre y documentos</span>
+            <span className="rpm-step-sub muted">observaciones · factura · fotos (al expandir OT guardada)</span>
           </div>
-          <div className="field">
-            <label>Unidad</label>
-            <select value={rowUni} onChange={(e) => setRowUni(e.target.value)}>
-              {UNIDADES_OPS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
-              ))}
-            </select>
+          <span className="rpm-step-chevron" aria-hidden>
+            {stepCierreOpen ? '▼' : '▶'}
+          </span>
+        </button>
+        {stepCierreOpen ? (
+          <div className="rpm-step-body rpm-step-body-nested">
+            <div className="field field-full">
+              <label>Trabajo realizado / observaciones</label>
+              <textarea rows={3} placeholder="Descripción del trabajo realizado.." value={obs} onChange={(e) => setObs(e.target.value)} />
+            </div>
           </div>
-          <div className="field">
-            <label>Cantidad</label>
-            <input type="number" min={0} step={1} value={rowQty} onChange={(e) => setRowQty(Number(e.target.value))} />
-          </div>
-          <div className="field">
-            <label>P. unit. ($) editable</label>
-            <input type="number" min={0} step={1} value={rowPu} onChange={(e) => setRowPu(Number(e.target.value))} />
-          </div>
-        </div>
-        <div className="form-ops-add-row">
-          <button type="button" className="btn btn-agregar-item" onClick={agregarItem}>
-            + Agregar ítem
-          </button>
-        </div>
+        ) : null}
 
-        <LineItemsEditor items={items} onChange={setItems} fmt={fmt} />
-
-        <div className="field field-full">
-          <label>Trabajo realizado / observaciones</label>
-          <textarea rows={3} placeholder="Descripción del trabajo realizado.." value={obs} onChange={(e) => setObs(e.target.value)} />
-        </div>
-
-        <div className="form-row-actions">
+        <div className="form-row-actions" style={{ marginTop: 14 }}>
           <button type="button" className="btn btn-primary btn-guardar" onClick={guardar}>
             ✓ Guardar orden
           </button>
@@ -567,16 +770,38 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
           </div>
         ) : (
           <div className="lista-ots-exp">
-            {lista.map((o) => {
+            {listaGrouped.map((o, idx) => {
+              const prev = idx > 0 ? listaGrouped[idx - 1] : null
+              const showEntLabel = Boolean(prev && prev.estado !== 'Entregado' && o.estado === 'Entregado')
               const open = expandedFolio === o.folio
               const entregado = o.estado === 'Entregado'
               const listo = o.estado === 'Listo'
               const venc = otVencida(o, hoy)
-              const rowCls = ['exp-row', venc ? 'ot-exp-venc' : '', entregado ? 'ot-exp-entregado' : '', listo && !entregado ? 'ot-exp-listo' : '']
+              const rowCls = [
+                'exp-row',
+                venc ? 'ot-exp-venc' : '',
+                entregado ? 'ot-exp-entregado' : '',
+                listo && !entregado ? 'ot-exp-listo' : '',
+                !entregado ? 'rpm-ot-fila-activa' : '',
+              ]
                 .filter(Boolean)
                 .join(' ')
               return (
-                <div key={o.folio} className={rowCls}>
+                <Fragment key={o.folio}>
+                  {idx === 0 && o.estado !== 'Entregado' && listaActivas.length > 0 ? (
+                    <div className="rpm-ot-group-label rpm-ot-group-activas">Activas</div>
+                  ) : null}
+                  {idx === 0 && o.estado === 'Entregado' && listaEntregadas.length > 0 ? (
+                    <div className="rpm-ot-group-sep">
+                      <span>Entregadas</span>
+                    </div>
+                  ) : null}
+                  {showEntLabel ? (
+                    <div className="rpm-ot-group-sep" role="separator">
+                      <span>Entregadas</span>
+                    </div>
+                  ) : null}
+                  <div className={rowCls}>
                   <button type="button" className={`exp-hdr ${entregado ? 'ot-exp-hdr-entregado' : ''}`} onClick={() => setExpandedFolio(open ? null : o.folio)}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span className="folio-ot">{o.folio}</span>
@@ -588,7 +813,7 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
                         </span>
                       ) : null}
                       <span className={`status-pill ${estadoOtPillClass(o, hoy)}`}>{estadoOtEtiqueta(o, hoy)}</span>
-                      {o.mecanico ? <span className="badge b-blue">{o.mecanico}</span> : null}
+                      {o.mecanico ? <span className="rpm-mec-row-badge">👷 {o.mecanico}</span> : null}
                       {o.cotizacionOrigen ? (
                         <button
                           type="button"
@@ -606,8 +831,8 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
                     <div className="exp-hdr-meta">
                       <div className="exp-hdr-meta-total">{fmt(o.total)}</div>
                       <div className="exp-hdr-meta-sub">
-                        {o.fechaIn || ''}
-                        {o.fechaEst ? ` → ${o.fechaEst}` : ''}
+                        {o.fechaIn ? isoDateToDdMmYyyy(o.fechaIn) : ''}
+                        {o.fechaEst ? ` → ${isoDateToDdMmYyyy(o.fechaEst)}` : ''}
                         {o.km ? ` · ${new Intl.NumberFormat('es-CL').format(o.km)} km` : ''}
                       </div>
                     </div>
@@ -662,12 +887,27 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
                           compactRemove
                         />
                       )}
+                      <div className="field" style={{ maxWidth: 280 }}>
+                        <label>Descuento global ($)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={o.descuento ?? 0}
+                          onChange={(e) => patchOt(o.folio, { descuento: Number(e.target.value) })}
+                        />
+                      </div>
                       <div className="cot-add-inline">
                         <input
                           className="cot-add-inline-grow"
                           placeholder="Descripción del ítem"
                           value={addNom}
-                          onChange={(e) => setAddNom(e.target.value)}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            setAddNom(v)
+                            const inv = inventarioCoincidenciaExacta(db, v)
+                            if (inv) setAddPu(Math.max(0, Number(inv.precio) || 0))
+                          }}
                         />
                         <input
                           type="number"
@@ -695,6 +935,95 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
                         <label>Observaciones / trabajo realizado</label>
                         <textarea rows={3} value={o.obs} onChange={(e) => patchOt(o.folio, { obs: e.target.value })} />
                       </div>
+                      <div className="sub-seccion-ot" style={{ marginTop: 14 }}>
+                        Documento tributario (orden)
+                      </div>
+                      <div className="g4-ot-row2">
+                        <div className="field">
+                          <label>Tipo (Boleta / Factura / …)</label>
+                          <input
+                            type="text"
+                            placeholder="Ej: Factura"
+                            value={o.docTipo ?? ''}
+                            onChange={(e) => patchOt(o.folio, { docTipo: e.target.value })}
+                          />
+                        </div>
+                        <div className="field">
+                          <label>Folio documento</label>
+                          <input
+                            type="text"
+                            value={o.docFolio ?? ''}
+                            onChange={(e) => patchOt(o.folio, { docFolio: e.target.value })}
+                          />
+                        </div>
+                        <div className="field">
+                          <label>Fecha documento</label>
+                          <input
+                            type="date"
+                            value={o.docFecha ?? ''}
+                            onChange={(e) => patchOt(o.folio, { docFecha: e.target.value })}
+                          />
+                        </div>
+                        <div className="field">
+                          <label>Monto documento ($)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={o.docMonto != null && Number.isFinite(o.docMonto) ? o.docMonto : ''}
+                            onChange={(e) => {
+                              const raw = e.target.value
+                              patchOt(o.folio, {
+                                docMonto: raw === '' ? undefined : Number(raw),
+                              })
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="field field-full">
+                        <label>Adjuntar documento (PDF o imagen, máx 2MB)</label>
+                        <input
+                          type="file"
+                          accept=".pdf,image/*,application/pdf"
+                          onChange={(e) => void onPickAdjuntoOt(o.folio, e.target.files?.[0])}
+                        />
+                        {o.docAdjNombre ? (
+                          <div className="vt-doc-banner">
+                            <span>
+                              Documento: <strong>{o.docTipo || 'Documento'}</strong> · <strong>{o.docAdjNombre}</strong> (
+                              {humanBytes(o.docAdjSize || 0)})
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-teal"
+                              onClick={() => {
+                                if (!openDocumentoAdjunto(o.docAdjDataUrl)) showToast('No se pudo abrir el adjunto', 'warn')
+                              }}
+                            >
+                              📎 Ver adjunto
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                      {o.imgs?.length ? (
+                        <>
+                          <div className="vh-imgs-title" style={{ marginTop: 12 }}>
+                            Fotos ingreso OT ({o.imgs.length})
+                          </div>
+                          <div className="vh-imgs-row">
+                            {o.imgs.map((src, ix) => (
+                              <button
+                                key={ix}
+                                type="button"
+                                className="vh-img-thumb"
+                                onClick={() => window.open(src, '_blank')}
+                              >
+                                <img src={src} alt="" />
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : null}
                       <div className="cot-exp-actions">
                         <button type="button" className="btn btn-xs btn-outline" onClick={() => imprimirPdf(o.folio)}>
                           🖨 PDF
@@ -712,6 +1041,7 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
                     </div>
                   ) : null}
                 </div>
+                </Fragment>
               )
             })}
           </div>
@@ -741,7 +1071,17 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
             </div>
             <div className="field">
               <label>Forma de pago</label>
-              <select value={ventaFpago} onChange={(e) => setVentaFpago(e.target.value)}>
+              <select
+                value={ventaFpago}
+                onChange={(e) => {
+                  setVentaFpago(e.target.value)
+                  if (e.target.value !== 'Cheque') {
+                    setVentaChequeNumero('')
+                    setVentaChequeBanco('')
+                    setVentaChequeFechaCobro('')
+                  }
+                }}
+              >
                 {FPAGO_OT.map((fp) => (
                   <option key={fp} value={fp}>
                     {fp}
@@ -749,6 +1089,22 @@ export function OrdenesModule({ db, setDb, settings, showToast, onIrCotizaciones
                 ))}
               </select>
             </div>
+            {ventaFpago === 'Cheque' ? (
+              <>
+                <div className="field">
+                  <label>N° de cheque</label>
+                  <input value={ventaChequeNumero} onChange={(e) => setVentaChequeNumero(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Banco emisor</label>
+                  <input value={ventaChequeBanco} onChange={(e) => setVentaChequeBanco(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Fecha de cobro</label>
+                  <input type="date" value={ventaChequeFechaCobro} onChange={(e) => setVentaChequeFechaCobro(e.target.value)} />
+                </div>
+              </>
+            ) : null}
             <div className="modal-actions">
               <button type="button" className="btn btn-primary" onClick={confirmarVentaOt}>
                 Confirmar

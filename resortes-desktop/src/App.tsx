@@ -1,15 +1,6 @@
-import {
-  type Dispatch,
-  type FormEvent,
-  type SetStateAction,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
-import type { AppSettings, Db, Vehiculo } from './appTypes'
+import type { AppSettings, Db } from './appTypes'
 import { ConfigModule } from './ConfigModule'
 import { defaultAppSettings } from './appSettings'
 import { stashAnticiposNav } from './anticiposNav'
@@ -26,11 +17,20 @@ import { MecanicosModule } from './MecanicosModule'
 import { OrdenesModule } from './OrdenesModule'
 import { VentasModule } from './VentasModule'
 import { VacacionesModule } from './VacacionesModule'
+import { PedidosFabricacionModule } from './PedidosFabricacionModule'
 import { ProveedoresModule } from './ProveedoresModule'
+import { VehiculosModule } from './VehiculosModule'
 import { DashboardSection } from './DashboardSection'
 import type { Section } from './sections'
+import { mecanicoEnNomina } from './opsHelpers'
 import { anticipoDescuentaLiquidacion } from './remuneracionesHelpers'
-import { isSupabaseConfigured, loadOnlineDb, loadOnlineSettings, saveOnlineAll } from './supabaseOnline'
+import {
+  isSupabaseConfigured,
+  loadOnlineDb,
+  loadOnlineSettings,
+  saveOnlineAll,
+  verifyRemoteMatchesLocal,
+} from './supabaseOnline'
 import './App.css'
 
 const LS_THEME = 'rpm_theme'
@@ -40,10 +40,6 @@ const LS_PIN_VENDEDOR = 'rpm_pin_vendedor'
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
-function uid() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
-}
-
 const defaultCats = [
   'Lubricantes',
   'Filtros',
@@ -83,208 +79,23 @@ function getPinVendedor() {
   return localStorage.getItem(LS_PIN_VENDEDOR) || '1120'
 }
 
-function VehiculosPane({
-  db,
-  setDb,
-  showToast,
-  vehClientePref,
-  setVehClientePref,
-}: {
-  db: Db
-  setDb: Dispatch<SetStateAction<Db>>
-  showToast: (m: string, t?: 'ok' | 'err' | 'warn') => void
-  vehClientePref: string
-  setVehClientePref: (s: string) => void
-}) {
-  const [q, setQ] = useState('')
-  const [formKey, setFormKey] = useState(0)
-
-  const lista = useMemo(() => {
-    const qq = q.toLowerCase().trim()
-    if (!qq) return db.vehiculos
-    return db.vehiculos.filter(
-      (v) =>
-        v.patente.toLowerCase().includes(qq) ||
-        v.clienteNombre.toLowerCase().includes(qq) ||
-        (v.marca || '').toLowerCase().includes(qq) ||
-        (v.modelo || '').toLowerCase().includes(qq),
-    )
-  }, [db.vehiculos, q])
-
-  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const fd = new FormData(e.currentTarget)
-    const cid = String(fd.get('vh_cli') || '')
-    const pat = String(fd.get('vh_pat') || '').trim().toUpperCase()
-    if (!cid || !pat) {
-      showToast('Propietario y patente son obligatorios', 'err')
-      return
-    }
-    if (db.vehiculos.some((v) => v.patente === pat)) {
-      showToast('Ya existe un vehículo con esa patente', 'err')
-      return
-    }
-    const c = db.clientes.find((x) => x.id === cid)
-    if (!c) return
-    const v: Vehiculo = {
-      id: uid(),
-      clienteId: cid,
-      clienteNombre: c.nombre,
-      patente: pat,
-      marca: String(fd.get('vh_marca') || '').trim(),
-      modelo: String(fd.get('vh_mod') || '').trim(),
-      anio: String(fd.get('vh_anio') || '').trim(),
-      color: String(fd.get('vh_col') || '').trim(),
-      combustible: String(fd.get('vh_comb') || '').trim(),
-      vin: String(fd.get('vh_vin') || '').trim(),
-      km: Number(fd.get('vh_km')) || 0,
-      creado: new Date().toISOString(),
-    }
-    setDb((d) => ({ ...d, vehiculos: [v, ...d.vehiculos] }))
-    showToast(`Vehículo ${pat} registrado`)
-    setFormKey((k) => k + 1)
-  }
-
-  return (
-    <>
-      <div className="card">
-        <div className="card-title">
-          <div className="card-title-left">Registrar vehículo</div>
-        </div>
-        <form key={formKey} className="g3" onSubmit={onSubmit}>
-          <div className="field">
-            <label>Propietario *</label>
-            <select name="vh_cli" required value={vehClientePref} onChange={(e) => setVehClientePref(e.target.value)}>
-              <option value="">— Seleccionar —</option>
-              {db.clientes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Patente *</label>
-            <input name="vh_pat" required placeholder="ABCD12" style={{ textTransform: 'uppercase' }} />
-          </div>
-          <div className="field">
-            <label>Marca</label>
-            <input name="vh_marca" placeholder="Toyota" />
-          </div>
-          <div className="field">
-            <label>Modelo</label>
-            <input name="vh_mod" placeholder="Corolla" />
-          </div>
-          <div className="field">
-            <label>Año</label>
-            <input name="vh_anio" type="number" placeholder="2020" />
-          </div>
-          <div className="field">
-            <label>Color</label>
-            <input name="vh_col" />
-          </div>
-          <div className="field">
-            <label>Combustible</label>
-            <input name="vh_comb" placeholder="Bencina / Diésel..." />
-          </div>
-          <div className="field">
-            <label>Km</label>
-            <input name="vh_km" type="number" min={0} step={1} />
-          </div>
-          <div className="field">
-            <label>VIN</label>
-            <input name="vh_vin" />
-          </div>
-          <div className="form-row-actions">
-            <button type="submit" className="btn btn-primary btn-guardar">
-              ✓ Guardar
-            </button>
-          </div>
-        </form>
-      </div>
-      <div className="card">
-        <div className="card-title">
-          <div className="card-title-left">Vehículos registrados</div>
-          <span className="card-count">
-            {lista.length} vehículo{lista.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-        <div className="sbar sbar-full">
-          <input
-            className="input-buscar-clientes"
-            placeholder="Buscar patente, cliente, marca..."
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </div>
-        {!lista.length ? (
-          <div className="empty">
-            <div className="empty-icon">🚗</div>
-            <div>No hay vehículos</div>
-          </div>
-        ) : (
-          <div className="tw">
-            <table>
-              <thead>
-                <tr>
-                  <th>Patente</th>
-                  <th>Cliente</th>
-                  <th>Marca / Modelo</th>
-                  <th>Km</th>
-                  <th className="th-actions">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lista.map((v) => (
-                  <tr key={v.id}>
-                    <td>
-                      <strong>{v.patente}</strong>
-                    </td>
-                    <td>{v.clienteNombre}</td>
-                    <td>
-                      {v.marca} {v.modelo}
-                    </td>
-                    <td>{v.km || '—'}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-red"
-                        onClick={() => {
-                          if (!window.confirm('¿Eliminar vehículo?')) return
-                          setDb((d) => ({ ...d, vehiculos: d.vehiculos.filter((x) => x.id !== v.id) }))
-                          showToast('Vehículo eliminado')
-                        }}
-                      >
-                        Eliminar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </>
-  )
-}
-
 const titles: Record<Section, [string, string]> = {
   dashboard: ['Dashboard', 'Resumen general del taller'],
   agenda: ['Agenda', 'Notas, recordatorios y reservas'],
   clientes: ['Clientes', 'Gestión de clientes'],
-  vehiculos: ['Vehículos', 'Maestro de vehículos'],
+  vehiculos: ['Vehículos', 'Gestión de vehículos por propietario'],
   inventario: ['Inventario', 'Productos, repuestos y servicios'],
-  mecanicos: ['Mecánicos', 'Equipo de trabajo'],
+  mecanicos: ['Mecánicos', 'Registro y equipo de trabajo'],
   cotizaciones: ['Cotizaciones', 'Presupuestos y propuestas'],
   ordenes: ['Órdenes de Trabajo', 'Gestión de servicios en curso'],
   ventas: ['Ventas', 'Historial de órdenes facturadas'],
-  informes: ['Informes — Trazabilidad', 'Historial completo por cliente y vehículo'],
+  informes: ['Informes', 'Ventas, mecánicos e historial'],
+  pedidosFabricacion: ['Pedidos fabricación', 'Resortes y trabajos a medida'],
   creditos: ['Cuentas por Cobrar', 'Gestión de créditos y deudas de clientes'],
   gastos: ['Gastos', 'Control de egresos del taller'],
   reportes: ['Reportes', 'Análisis financiero y estadísticas'],
   anticipos: ['Anticipos / Préstamos / Descuentos', 'Gestión de haberes y descuentos de trabajadores'],
-  vacaciones: ['Vacaciones', 'Control de períodos de descanso'],
+  vacaciones: ['Vacaciones', 'Control de días hábiles y períodos de descanso'],
   proveedores: ['Proveedores', 'Gestión de proveedores y compras'],
   config: ['Configuración', 'Datos del taller, documentos y backup'],
 }
@@ -295,9 +106,13 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(() => defaultAppSettings())
   const [cloudReady, setCloudReady] = useState(false)
   const [cloudBusy, setCloudBusy] = useState(hasSupabase)
+  const [syncPhase, setSyncPhase] = useState<'pending' | 'saving' | 'synced' | 'error'>('pending')
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null)
+  const [verifyBusy, setVerifyBusy] = useState(false)
   const [section, setSection] = useState<Section>('dashboard')
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' | 'warn' } | null>(null)
   const [globalQ, setGlobalQ] = useState('')
+  const globalSearchRef = useRef<HTMLInputElement>(null)
   const [dark, setDark] = useState(() => localStorage.getItem(LS_THEME) === 'dark')
   const [vehClientePref, setVehClientePref] = useState('')
   const [role, setRole] = useState<UserRole>('admin')
@@ -371,6 +186,9 @@ export default function App() {
             creditosMec: remoteSettings.extras?.creditosMec ?? defaultAppSettings().extras.creditosMec,
             comisionesAjustadas:
               remoteSettings.extras?.comisionesAjustadas ?? defaultAppSettings().extras.comisionesAjustadas,
+            liquidaciones: remoteSettings.extras?.liquidaciones ?? defaultAppSettings().extras.liquidaciones,
+            pedidosFabricacion:
+              remoteSettings.extras?.pedidosFabricacion ?? defaultAppSettings().extras.pedidosFabricacion,
           },
         })
       }
@@ -402,21 +220,63 @@ export default function App() {
 
   useEffect(() => {
     if (!hasSupabase || !cloudReady) return
-    const flush = () => void saveOnlineAll(dbRef.current, settingsRef.current)
+    const flush = () =>
+      void saveOnlineAll(dbRef.current, settingsRef.current).then((r) => {
+        if (!r.ok) console.error('[Supabase pagehide]', r.message)
+      })
     window.addEventListener('pagehide', flush)
     return () => window.removeEventListener('pagehide', flush)
   }, [hasSupabase, cloudReady])
 
   useEffect(() => {
     if (!hasSupabase || !cloudReady) return
+    setSyncPhase('pending')
     const t = window.setTimeout(() => {
+      setSyncPhase('saving')
       void (async () => {
-        const ok = await saveOnlineAll(db, settings)
-        if (!ok) showToast('Error al guardar en Supabase', 'err')
+        const sr = await saveOnlineAll(dbRef.current, settingsRef.current)
+        if (sr.ok) {
+          setSyncPhase('synced')
+          setLastSyncedAt(Date.now())
+        } else {
+          setSyncPhase('error')
+          const m = sr.message
+          showToast(m.length > 380 ? `${m.slice(0, 380)}…` : m, 'err')
+        }
       })()
     }, 200)
     return () => window.clearTimeout(t)
   }, [db, settings, hasSupabase, cloudReady])
+
+  const formatSyncAgo = useCallback((ts: number) => {
+    const s = Math.floor((Date.now() - ts) / 1000)
+    if (s < 10) return 'hace unos segundos'
+    if (s < 60) return `hace ${s} s`
+    const m = Math.floor(s / 60)
+    if (m < 60) return `hace ${m} min`
+    const h = Math.floor(m / 60)
+    return `hace ${h} h`
+  }, [])
+
+  const handleCloudSyncBadgeClick = useCallback(async () => {
+    if (!hasSupabase || cloudBusy || verifyBusy) return
+    if (!cloudReady) {
+      void pullFromSupabase()
+      return
+    }
+    setVerifyBusy(true)
+    try {
+      const r = await verifyRemoteMatchesLocal(dbRef.current, settingsRef.current)
+      const d = r.ok ? r.detail : r.detail.length > 420 ? `${r.detail.slice(0, 420)}…` : r.detail
+      showToast(d, r.ok ? 'ok' : 'err')
+      if (r.ok) {
+        setSyncPhase('synced')
+        setLastSyncedAt(Date.now())
+      }
+    } finally {
+      setVerifyBusy(false)
+    }
+  }, [hasSupabase, cloudBusy, cloudReady, verifyBusy, pullFromSupabase])
 
   useEffect(() => {
     localStorage.setItem(LS_THEME, dark ? 'dark' : 'light')
@@ -450,6 +310,11 @@ export default function App() {
     [db.anticipos],
   )
 
+  const badgePedidosActivos = useMemo(
+    () => (settings.extras.pedidosFabricacion ?? []).filter((p) => p.estado !== 'Retirado').length,
+    [settings.extras.pedidosFabricacion],
+  )
+
   const exportClientesExcel = () => {
     const rows = [['Nombre', 'RUT', 'Teléfono', 'Email', 'Dirección', 'Origen', 'Observaciones']]
     db.clientes.forEach((c) => rows.push([c.nombre, c.rut, c.tel, c.email, c.dir, c.origen, c.obs]))
@@ -473,7 +338,9 @@ export default function App() {
   }
 
   const exportMecanicosExcel = () => {
-    const rows: (string | number)[][] = [['Nombre', 'RUT', 'Sueldo base', 'Especialidad', 'Teléfono', 'Email', 'Estado']]
+    const rows: (string | number)[][] = [
+      ['Nombre', 'RUT', 'Sueldo base', 'Especialidad', 'Teléfono', 'Email', 'Fecha contrato', 'Estado'],
+    ]
     db.mecanicos.forEach((m) =>
       rows.push([
         m.nombre,
@@ -482,7 +349,8 @@ export default function App() {
         m.especialidad,
         m.tel,
         m.email,
-        m.activo ? 'Activo' : 'Inactivo',
+        m.fechaContrato ?? '',
+        mecanicoEnNomina(m) ? 'Activo' : 'Inactivo',
       ]),
     )
     const wb = XLSX.utils.book_new()
@@ -586,6 +454,63 @@ export default function App() {
     showToast('Excel exportado')
   }
 
+  const exportAgendaExcel = () => {
+    const wb = XLSX.utils.book_new()
+    const notasRows: (string | number)[][] = [
+      ['Título', 'Contenido', 'Color', 'Cliente', 'Fecha', 'Estado', 'Creado'],
+    ]
+    settings.extras.agendaNotas.forEach((n) =>
+      notasRows.push([
+        n.titulo,
+        n.detalle,
+        n.colorTag ?? '',
+        n.clienteNombre ?? '',
+        n.fecha,
+        n.estado,
+        n.creado,
+      ]),
+    )
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(notasRows), 'Notas')
+    const recRows: (string | number)[][] = [
+      ['Título', 'Fecha', 'Hora', 'Prioridad', 'Cliente', 'OT', 'Observaciones', 'Estado', 'Creado'],
+    ]
+    settings.extras.agendaRecordatorios.forEach((r) =>
+      recRows.push([
+        r.titulo,
+        r.fecha,
+        r.hora ?? '',
+        r.prioridad ?? '',
+        r.clienteNombre ?? '',
+        r.otFolio ?? '',
+        r.obs,
+        r.estado,
+        r.creado,
+      ]),
+    )
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(recRows), 'Recordatorios')
+    const resRows: (string | number)[][] = [
+      ['Cliente', 'Teléfono', 'Patente', 'Servicio', 'Fecha', 'Hora', 'Duración min', 'Mecánico', 'Obs.', 'Estado', 'Creado'],
+    ]
+    settings.extras.agendaReservas.forEach((r) =>
+      resRows.push([
+        r.cliente,
+        r.tel,
+        r.patente ?? '',
+        r.motivo,
+        r.fecha,
+        r.hora,
+        r.duracion ?? '',
+        r.mecanico ?? '',
+        r.obs ?? '',
+        r.estado,
+        r.creado,
+      ]),
+    )
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resRows), 'Reservas')
+    XLSX.writeFile(wb, `Agenda_${today()}.xlsx`)
+    showToast('Excel exportado')
+  }
+
   const exportConfigExcel = () => {
     const e = settings.empresa
     const b = settings.banco
@@ -622,6 +547,14 @@ export default function App() {
     setGlobalQ(q)
     const s = q.trim().toLowerCase()
     if (!s) return
+    const raw = q.trim()
+    const stashFilter = () => {
+      try {
+        sessionStorage.setItem('rpm-global-filter', raw)
+      } catch {
+        /* ignore */
+      }
+    }
     if (db.clientes.some((c) => c.nombre.toLowerCase().includes(s) || c.rut.toLowerCase().includes(s))) setSection('clientes')
     else if (db.vehiculos.some((v) => v.patente.toLowerCase().includes(s))) setSection('vehiculos')
     else if (
@@ -638,27 +571,37 @@ export default function App() {
           c.clienteNombre.toLowerCase().includes(s) ||
           (c.patente || '').toLowerCase().includes(s),
       )
-    )
+    ) {
+      stashFilter()
       setSection('cotizaciones')
-    else if (
+    } else if (
       db.ordenes.some(
         (o) =>
           o.folio.toLowerCase().includes(s) ||
           o.clienteNombre.toLowerCase().includes(s) ||
           (o.patente || '').toLowerCase().includes(s),
       )
-    )
+    ) {
+      stashFilter()
       setSection('ordenes')
-    else if (
+    } else if (
       db.ventas.some(
         (v) =>
           v.folio.toLowerCase().includes(s) ||
           v.clienteNombre.toLowerCase().includes(s) ||
           (v.patente || '').toLowerCase().includes(s),
       )
-    )
+    ) {
+      stashFilter()
       setSection('ventas')
-    else if (
+    } else if (
+      (settings.extras.pedidosFabricacion ?? []).some(
+        (p) => p.folio.toLowerCase().includes(s) || p.clienteNombre.toLowerCase().includes(s),
+      )
+    ) {
+      stashFilter()
+      setSection('pedidosFabricacion')
+    } else if (
       db.creditos.some(
         (c) =>
           c.clienteNombre.toLowerCase().includes(s) || (c.desc || '').toLowerCase().includes(s),
@@ -668,6 +611,18 @@ export default function App() {
     else if (db.gastos.some((g) => g.desc.toLowerCase().includes(s) || g.categoria.toLowerCase().includes(s)))
       setSection('gastos')
   }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      e.preventDefault()
+      globalSearchRef.current?.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const appBlocked = !hasSupabase || !cloudReady
   const roleBlocked = (s: Section) => role === 'vendedor' && restrictedForSeller.includes(s)
@@ -713,6 +668,11 @@ export default function App() {
                 Vendedor
               </button>
             </div>
+            {role === 'vendedor' && (
+              <p className="pin-role-hint">
+                Perfil <strong>Vendedor</strong>: sin acceso a Anticipos, Vacaciones, Gastos, Reportes ni Configuración (como en el prototipo).
+              </p>
+            )}
             <div className="field">
               <label>PIN de acceso</label>
               <input
@@ -817,14 +777,23 @@ export default function App() {
             <span className="ni">🔧</span>
             <span>Órdenes de Trabajo</span>
           </button>
+          <button
+            type="button"
+            className={section === 'pedidosFabricacion' ? 'nav-item active' : 'nav-item'}
+            onClick={() => setSection('pedidosFabricacion')}
+          >
+            <span className="ni">🏭</span>
+            <span>Pedidos fabricación</span>
+            {badgePedidosActivos > 0 ? <span className="nav-badge">{badgePedidosActivos}</span> : null}
+          </button>
           <button type="button" className={section === 'ventas' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('ventas')}>
             <span className="ni">🧾</span>
             <span>Ventas</span>
           </button>
           <div className="nav-group">Informes</div>
           <button type="button" className={section === 'informes' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('informes')}>
-            <span className="ni">🔍</span>
-            <span>Historial Cli./Veh.</span>
+            <span className="ni">📊</span>
+            <span>Informes</span>
           </button>
           <div className="nav-group">Finanzas</div>
           <button type="button" className={section === 'creditos' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('creditos')}>
@@ -833,24 +802,6 @@ export default function App() {
             {badgeCredNum > 0 && (
               <span className={`nav-badge${badgeCredVenc > 0 ? ' nav-badge-alert' : ''}`}>{badgeCredNum}</span>
             )}
-          </button>
-          <button
-            type="button"
-            className={section === 'gastos' ? 'nav-item active' : 'nav-item'}
-            onClick={() => !roleBlocked('gastos') && setSection('gastos')}
-            disabled={roleBlocked('gastos')}
-          >
-            <span className="ni">💸</span>
-            <span>Gastos</span>
-          </button>
-          <button
-            type="button"
-            className={section === 'reportes' ? 'nav-item active' : 'nav-item'}
-            onClick={() => !roleBlocked('reportes') && setSection('reportes')}
-            disabled={roleBlocked('reportes')}
-          >
-            <span className="ni">📈</span>
-            <span>Reportes</span>
           </button>
           <button
             type="button"
@@ -870,6 +821,24 @@ export default function App() {
           >
             <span className="ni">🏖️</span>
             <span>Vacaciones</span>
+          </button>
+          <button
+            type="button"
+            className={section === 'gastos' ? 'nav-item active' : 'nav-item'}
+            onClick={() => !roleBlocked('gastos') && setSection('gastos')}
+            disabled={roleBlocked('gastos')}
+          >
+            <span className="ni">💸</span>
+            <span>Gastos</span>
+          </button>
+          <button
+            type="button"
+            className={section === 'reportes' ? 'nav-item active' : 'nav-item'}
+            onClick={() => !roleBlocked('reportes') && setSection('reportes')}
+            disabled={roleBlocked('reportes')}
+          >
+            <span className="ni">📈</span>
+            <span>Reportes</span>
           </button>
           <div className="nav-group">Sistema</div>
           <button type="button" className={section === 'proveedores' ? 'nav-item active' : 'nav-item'} onClick={() => setSection('proveedores')}>
@@ -897,17 +866,52 @@ export default function App() {
           </div>
           <div className="topbar-right no-print">
             <input
+              ref={globalSearchRef}
               className="global-search"
-              placeholder="🔍 Búsqueda global..."
+              placeholder="🔍 Búsqueda global ( / para foco )…"
               value={globalQ}
               onChange={(e) => setGlobalQ(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && globalSearch(globalQ)}
             />
-            {hasSupabase && cloudReady && (
-              <span className="cloud-badge" title="Solo Supabase: datos y configuración del taller en la nube">
-                Solo Supabase
-              </span>
-            )}
+            {hasSupabase ? (
+              <button
+                type="button"
+                className={`cloud-badge cloud-badge--${cloudBusy ? 'connecting' : !cloudReady ? 'offline' : verifyBusy ? 'verify' : syncPhase}`}
+                disabled={cloudBusy || verifyBusy || (cloudReady && syncPhase === 'saving')}
+                title={
+                  verifyBusy
+                    ? 'Comprobando coincidencia con Supabase…'
+                    : cloudBusy
+                      ? 'Descargando datos desde Supabase…'
+                      : !cloudReady
+                        ? 'No se cargaron datos desde la nube. Clic para reintentar.'
+                        : syncPhase === 'pending'
+                          ? 'Hay cambios locales pendientes de guardarse en Supabase (~200 ms después de editar).'
+                          : syncPhase === 'saving'
+                            ? 'Guardando cambios en Supabase…'
+                            : syncPhase === 'error'
+                              ? 'Falló el último guardado automático. Clic para forzar guardado y verificación.'
+                              : lastSyncedAt
+                                ? `Último guardado correcto ${formatSyncAgo(lastSyncedAt)}. Clic para verificar que coincide con Supabase.`
+                                : 'Datos en la nube listos. Clic para verificar sincronización con Supabase.'
+                }
+                onClick={handleCloudSyncBadgeClick}
+              >
+                {verifyBusy
+                  ? 'Verificando…'
+                  : cloudBusy
+                    ? 'Conectando…'
+                    : !cloudReady
+                      ? 'Sin datos · reintentar'
+                      : syncPhase === 'pending'
+                        ? 'Pendiente envío'
+                        : syncPhase === 'saving'
+                          ? 'Guardando…'
+                          : syncPhase === 'error'
+                            ? 'Error · verificar'
+                            : 'Sincronizado'}
+              </button>
+            ) : null}
             <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Modo oscuro" onClick={() => setDark((d) => !d)}>
               {dark ? '☀️' : '🌙'}
             </button>
@@ -969,6 +973,11 @@ export default function App() {
                 ⬇ Excel
               </button>
             )}
+            {section === 'agenda' && (
+              <button type="button" className="btn btn-sm btn-excel" onClick={exportAgendaExcel}>
+                ⬇ Excel
+              </button>
+            )}
             {section === 'config' && (
               <button type="button" className="btn btn-sm btn-excel" onClick={exportConfigExcel}>
                 ⬇ Excel
@@ -981,7 +990,15 @@ export default function App() {
           {section === 'dashboard' && (
             <DashboardSection db={db} settings={settings} setSection={setSection} />
           )}
-          {section === 'agenda' && <AgendaModule settings={settings} setSettings={setSettings} showToast={showToast} />}
+          {section === 'agenda' && (
+            <AgendaModule
+              db={db}
+              settings={settings}
+              setSettings={setSettings}
+              showToast={showToast}
+              onIrOrdenes={() => setSection('ordenes')}
+            />
+          )}
           {section === 'clientes' && (
             <ClientesModule
               db={db}
@@ -991,15 +1008,18 @@ export default function App() {
                 setVehClientePref(id)
                 setSection('vehiculos')
               }}
+              onIrOrden={() => setSection('ordenes')}
             />
           )}
           {section === 'vehiculos' && (
-            <VehiculosPane
+            <VehiculosModule
               db={db}
               setDb={setDb}
+              settings={settings}
               showToast={showToast}
               vehClientePref={vehClientePref}
               setVehClientePref={setVehClientePref}
+              onIrOrden={() => setSection('ordenes')}
             />
           )}
           {section === 'inventario' && <InventarioModule db={db} setDb={setDb} showToast={showToast} />}
@@ -1022,7 +1042,19 @@ export default function App() {
               onIrCotizaciones={() => setSection('cotizaciones')}
             />
           )}
-          {section === 'ventas' && <VentasModule db={db} setDb={setDb} showToast={showToast} />}
+          {section === 'pedidosFabricacion' && (
+            <PedidosFabricacionModule db={db} settings={settings} setSettings={setSettings} showToast={showToast} />
+          )}
+          {section === 'ventas' && (
+            <VentasModule
+              db={db}
+              setDb={setDb}
+              settings={settings}
+              showToast={showToast}
+              onIrOrdenes={() => setSection('ordenes')}
+              onIrCotizaciones={() => setSection('cotizaciones')}
+            />
+          )}
           {section === 'informes' && <InformesModule db={db} showToast={showToast} />}
           {section === 'creditos' && <CreditosModule db={db} setDb={setDb} showToast={showToast} />}
           {section === 'gastos' && <GastosModule db={db} setDb={setDb} showToast={showToast} />}
@@ -1069,6 +1101,7 @@ export default function App() {
             section !== 'mecanicos' &&
             section !== 'cotizaciones' &&
             section !== 'ordenes' &&
+            section !== 'pedidosFabricacion' &&
             section !== 'ventas' &&
             section !== 'informes' &&
             section !== 'creditos' &&

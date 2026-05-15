@@ -12,6 +12,8 @@ import {
   creditosTodosPorMec,
   getComisionFinal,
 } from './remuneracionesHelpers'
+import { isoDateToDdMmYyyy as fmtFecha } from './dateFormat'
+import { mecanicoEnNomina } from './opsHelpers'
 
 export type LiquidacionTrabajadoresProps = {
   db: Db
@@ -23,16 +25,18 @@ export type LiquidacionTrabajadoresProps = {
   /** Botón «Exportar mes» como en HTML (solo anticipos con mes de descuento seleccionado). */
   showExportMes?: boolean
   cardClassName?: string
+  /**
+   * Controlar mes/año desde el padre (p. ej. KPIs de AnticiposModule alineados al mismo período).
+   * Si se omiten, se usa estado interno.
+   */
+  mesIdx?: number
+  setMesIdx?: Dispatch<SetStateAction<number>>
+  anioSel?: number
+  setAnioSel?: Dispatch<SetStateAction<number>>
 }
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
-}
-
-function fmtFecha(iso: string) {
-  if (!iso || iso.length < 10) return '—'
-  const [y, mo, dd] = iso.slice(0, 10).split('-')
-  return `${dd}/${mo}/${y}`
 }
 
 function proximaCuotaNoPagada(c: CreditoMec) {
@@ -382,12 +386,20 @@ export function LiquidacionTrabajadores({
   onIrAnticiposNuevo,
   showExportMes = false,
   cardClassName = 'card card-rep',
+  mesIdx: mesIdxProp,
+  setMesIdx: setMesIdxProp,
+  anioSel: anioSelProp,
+  setAnioSel: setAnioSelProp,
 }: LiquidacionTrabajadoresProps) {
-  const [mesIdx, setMesIdx] = useState(() => new Date().getMonth())
-  const [anioSel, setAnioSel] = useState(() => new Date().getFullYear())
+  const [mesIdxInner, setMesIdxInner] = useState(() => new Date().getMonth())
+  const [anioInner, setAnioInner] = useState(() => new Date().getFullYear())
+  const mesIdx = mesIdxProp !== undefined ? mesIdxProp : mesIdxInner
+  const setMesIdx = setMesIdxProp ?? setMesIdxInner
+  const anioSel = anioSelProp !== undefined ? anioSelProp : anioInner
+  const setAnioSel = setAnioSelProp ?? setAnioInner
 
   const mesNombre = MESES_REM[mesIdx] ?? 'Ene'
-  const mecsActivos = useMemo(() => db.mecanicos.filter((m) => m.activo), [db.mecanicos])
+  const mecsActivos = useMemo(() => db.mecanicos.filter(mecanicoEnNomina), [db.mecanicos])
 
   return (
     <>

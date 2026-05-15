@@ -7,6 +7,7 @@ export type Section =
   | 'mecanicos'
   | 'cotizaciones'
   | 'ordenes'
+  | 'pedidosFabricacion'
   | 'ventas'
   | 'informes'
   | 'creditos'

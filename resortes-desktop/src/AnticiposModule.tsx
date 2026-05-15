@@ -3,7 +3,9 @@ import type { AnticipoRegistro, AppSettings, CreditoMec, CreditoMecCuota, Db } f
 import { AnticiposComprobanteTab } from './AnticiposComprobanteTab'
 import { LiquidacionTrabajadores } from './LiquidacionTrabajadores'
 import { takeAnticiposNav, type AnticiposTab } from './anticiposNav'
-import { anticipoDescuentaLiquidacion } from './remuneracionesHelpers'
+import { isoDateToDdMmYyyy } from './dateFormat'
+import { mecanicoEnNomina } from './opsHelpers'
+import { anticipoDescuentaLiquidacion, getComisionFinal } from './remuneracionesHelpers'
 
 type Tab = AnticiposTab
 
@@ -18,6 +20,20 @@ type Props = {
 }
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+const MESES_LARGOS = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre',
+]
 const TIPOS = ['Anticipo de sueldo', 'Préstamo', 'Descuento']
 
 function uid() {
@@ -57,13 +73,14 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
   const [mesIdx, setMesIdx] = useState(() => new Date().getMonth())
   const [anio, setAnio] = useState(() => new Date().getFullYear())
   const [desc, setDesc] = useState('')
-  const [nowBase] = useState(() => Date.now())
-
   const [credMecId, setCredMecId] = useState('')
   const [credMonto, setCredMonto] = useState(0)
   const [credCuotas, setCredCuotas] = useState(3)
   const [credDesc, setCredDesc] = useState('')
   const [credOpen, setCredOpen] = useState<string | null>(null)
+  /** Mismo período que la tabla de liquidación (KPI alineados al HTML del taller). */
+  const [liqMesIdx, setLiqMesIdx] = useState(() => new Date().getMonth())
+  const [liqAnio, setLiqAnio] = useState(() => new Date().getFullYear())
 
   useLayoutEffect(() => {
     const j = takeAnticiposNav()
@@ -73,17 +90,44 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
     if (j.nuevoTrabajadorId) setTrabId(j.nuevoTrabajadorId)
   }, [])
 
+  /** KPIs alineados al HTML (`renderStatsAnt`): mismo mes/año que la liquidación bajo las tarjetas */
   const stats = useMemo(() => {
-    const activos = db.anticipos.filter((a) => anticipoDescuentaLiquidacion(a.estado))
-    const saldoPend = activos.reduce((s, a) => s + a.monto, 0)
-    const now = new Date()
-    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    const esteMes = db.anticipos.filter((a) => a.fecha && a.fecha.slice(0, 7) === ym)
-    const totalMes = esteMes.reduce((s, a) => s + a.monto, 0)
-    const totalHist = db.anticipos.reduce((s, a) => s + a.monto, 0)
-    const nPagados = db.anticipos.filter((a) => a.estado === 'Pagado').length
-    return { saldoPend, nActivos: activos.length, totalMes, nMes: esteMes.length, totalHist, nPagados }
-  }, [db.anticipos, nowBase])
+    const mesNombre = MESES[liqMesIdx]!
+    const mesEtiquetaLargo = MESES_LARGOS[liqMesIdx] ?? mesNombre
+    const totalAnticipadoMes = db.anticipos
+      .filter(
+        (a) =>
+          a.mesDescuento === liqMesIdx &&
+          a.anioDescuento === liqAnio &&
+          anticipoDescuentaLiquidacion(a.estado),
+      )
+      .reduce((s, a) => s + a.monto, 0)
+    const creditosActivos = settings.extras.creditosMec.filter((c) => c.estado === 'Activo')
+    const nCred = creditosActivos.length
+    const saldoCred = creditosActivos.reduce((s, c) => s + c.saldo, 0)
+    const aj = settings.extras.comisionesAjustadas ?? {}
+    const comisionesMes = db.mecanicos
+      .filter(mecanicoEnNomina)
+      .reduce((s, m) => s + getComisionFinal(aj, db, m.id, mesNombre, liqAnio), 0)
+    const nMecActivos = db.mecanicos.filter(mecanicoEnNomina).length
+    return {
+      nMecActivos,
+      totalAnticipadoMes,
+      nCred,
+      saldoCred,
+      comisionesMes,
+      mesNombre,
+      mesEtiquetaLargo,
+      anioCur: liqAnio,
+    }
+  }, [
+    db.anticipos,
+    db.mecanicos,
+    liqMesIdx,
+    liqAnio,
+    settings.extras.creditosMec,
+    settings.extras.comisionesAjustadas,
+  ])
 
   const [histQ, setHistQ] = useState('')
   const [histEst, setHistEst] = useState('')
@@ -98,9 +142,10 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
     }
     if (histEst === 'Pendiente') {
       lista = lista.filter((a) => a.estado === 'Pendiente' || a.estado === 'Activo')
-    } else if (histEst === 'Pagado') {
+    } else if (histEst === 'Descontado') {
       lista = lista.filter((a) => a.estado === 'Pagado')
     }
+    lista.sort((a, b) => (b.fecha > a.fecha ? 1 : -1))
     return lista
   }, [db.anticipos, histQ, histEst])
 
@@ -167,50 +212,56 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
   const fmt = (n: number) =>
     new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
 
-  const aniosOpts = [anio - 1, anio, anio + 1]
-
   return (
     <>
-      <div className="stats stats-anticipos">
+      <div className="stats stats-anticipos cred-stats-html" style={{ marginBottom: 14 }}>
         <div className="stat">
-          <div className="stat-lbl">Saldo pendiente total</div>
-          <div className="stat-val">{fmt(stats.saldoPend)}</div>
-          <div className="stat-sub">{stats.nActivos} registros activos</div>
+          <div className="stat-lbl">Mecánicos activos</div>
+          <div className="stat-val">{stats.nMecActivos}</div>
+          <div className="stat-sub">en nómina</div>
         </div>
         <div className="stat">
-          <div className="stat-lbl">Total ABR (este mes)</div>
-          <div className="stat-val">{fmt(stats.totalMes)}</div>
-          <div className="stat-sub">{stats.nMes} movimientos</div>
-        </div>
-        <div className="stat">
-          <div className="stat-lbl">Total otorgado hist.</div>
-          <div className="stat-val">{fmt(stats.totalHist)}</div>
-          <div className="stat-sub">acumulado</div>
-        </div>
-        <div className="stat">
-          <div className="stat-lbl">Registros pagados</div>
-          <div className="stat-val" style={{ color: 'var(--green)' }}>
-            {stats.nPagados}
+          <div className="stat-lbl">
+            Anticipos {stats.mesEtiquetaLargo} {stats.anioCur}
           </div>
-          <div className="stat-sub">completados</div>
+          <div className="stat-val" style={{ color: '#c27803' }}>
+            {fmt(stats.totalAnticipadoMes)}
+          </div>
+          <div className="stat-sub">mes/año de descuento</div>
+        </div>
+        <div className="stat">
+          <div className="stat-lbl">Créditos activos</div>
+          <div className="stat-val" style={{ color: 'var(--red)' }}>
+            {stats.nCred}
+          </div>
+          <div className="stat-sub">{fmt(stats.saldoCred)} pendiente</div>
+        </div>
+        <div className="stat">
+          <div className="stat-lbl">Comisiones generadas</div>
+          <div className="stat-val" style={{ color: 'var(--green)' }}>
+            {fmt(stats.comisionesMes)}
+          </div>
+          <div className="stat-sub">
+            {stats.mesEtiquetaLargo} {stats.anioCur}
+          </div>
         </div>
       </div>
 
-      <div className="inv-tabs anticipos-tabs">
-        <button type="button" className={tab === 'resumen' ? 'inv-tab active' : 'inv-tab'} onClick={() => setTab('resumen')}>
-          Trabajadores / liquidación
+      <div className="agenda-html-tabs tabs ant-html-tabs">
+        <button type="button" className={tab === 'resumen' ? 'tab active' : 'tab'} onClick={() => setTab('resumen')}>
+          👷 Trabajadores
         </button>
-        <button type="button" className={tab === 'nuevo' ? 'inv-tab active' : 'inv-tab'} onClick={() => setTab('nuevo')}>
-          Nuevo anticipo
+        <button type="button" className={tab === 'nuevo' ? 'tab active' : 'tab'} onClick={() => setTab('nuevo')}>
+          ➕ Nuevo anticipo
         </button>
-        <button type="button" className={tab === 'credMec' ? 'inv-tab active' : 'inv-tab'} onClick={() => setTab('credMec')}>
-          Créditos
+        <button type="button" className={tab === 'credMec' ? 'tab active' : 'tab'} onClick={() => setTab('credMec')}>
+          💳 Créditos
         </button>
-        <button type="button" className={tab === 'historial' ? 'inv-tab active' : 'inv-tab'} onClick={() => setTab('historial')}>
-          Historial
+        <button type="button" className={tab === 'historial' ? 'tab active' : 'tab'} onClick={() => setTab('historial')}>
+          📋 Historial
         </button>
-        <button type="button" className={tab === 'pdf' ? 'inv-tab active' : 'inv-tab'} onClick={() => setTab('pdf')}>
-          Comprobante
+        <button type="button" className={tab === 'pdf' ? 'tab active' : 'tab'} onClick={() => setTab('pdf')}>
+          🖨 Comprobante
         </button>
       </div>
 
@@ -222,6 +273,10 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
           showToast={showToast}
           showExportMes
           cardClassName="card card-ant"
+          mesIdx={liqMesIdx}
+          setMesIdx={setLiqMesIdx}
+          anioSel={liqAnio}
+          setAnioSel={setLiqAnio}
           onIrAnticiposCredito={(id) => {
             setCredMecId(id)
             setTab('credMec')
@@ -236,14 +291,14 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
       {tab === 'nuevo' && (
         <div className="card card-ant">
           <div className="card-title">
-            <div className="card-title-left">Registrar anticipo, préstamo o descuento</div>
+            <div className="card-title-left">Registrar anticipo</div>
           </div>
           <div className="g4-ot-row1">
             <div className="field">
               <label>Trabajador *</label>
               <select value={trabId} onChange={(e) => setTrabId(e.target.value)}>
                 <option value="">— Seleccionar —</option>
-                {db.mecanicos.filter((m) => m.activo).map((m) => (
+                {db.mecanicos.filter(mecanicoEnNomina).map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.nombre}
                   </option>
@@ -282,27 +337,28 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
             </div>
             <div className="field">
               <label>Año</label>
-              <select value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
-                {aniosOpts.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
+              <input
+                type="number"
+                min={2020}
+                max={2100}
+                step={1}
+                value={anio}
+                onChange={(e) => setAnio(Number(e.target.value) || new Date().getFullYear())}
+                style={{ padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--surface)', color: 'var(--text)' }}
+              />
             </div>
           </div>
           <div className="field field-full">
             <label>Descripción / motivo</label>
-            <textarea
-              rows={3}
-              placeholder="Ej: Anticipo quincena, préstamo para emergencia..."
+            <input
+              placeholder="Ej: Anticipo quincena, emergencia médica..."
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
             />
           </div>
           <div className="form-row-actions">
             <button type="button" className="btn btn-primary btn-guardar" onClick={registrar}>
-              ✓ Registrar
+              ✓ Registrar anticipo
             </button>
             <button type="button" className="btn btn-outline" onClick={limpiar}>
               ↺ Limpiar
@@ -336,9 +392,9 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
                 color: 'var(--text)',
               }}
             >
-              <option value="">Todos los estados</option>
+              <option value="">Todos</option>
               <option value="Pendiente">Pendientes</option>
-              <option value="Pagado">Descontados / pagados</option>
+              <option value="Descontado">Descontados</option>
             </select>
           </div>
           {!historialFiltrado.length ? (
@@ -350,24 +406,31 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
                   <tr>
                     <th>Fecha</th>
                     <th>Trabajador</th>
-                    <th>Tipo</th>
-                    <th>Monto</th>
-                    <th>Mes desc.</th>
+                    <th>Mes descuento</th>
+                    <th>Descripción</th>
                     <th>Estado</th>
-                    <th className="th-actions">Acciones</th>
+                    <th className="tr">Monto</th>
+                    <th className="th-actions"> </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {historialFiltrado.map((a) => (
+                  {historialFiltrado.map((a) => {
+                    const estadoLbl = a.estado === 'Pagado' ? 'Descontado' : a.estado
+                    const pendienteVisual = a.estado === 'Pendiente' || a.estado === 'Activo'
+                    return (
                     <tr key={a.id}>
-                      <td>{a.fecha}</td>
-                      <td>{a.trabajadorNombre}</td>
-                      <td>{a.tipo}</td>
-                      <td>{fmt(a.monto)}</td>
+                      <td style={{ fontSize: 11 }}>{isoDateToDdMmYyyy(a.fecha)}</td>
+                      <td style={{ fontWeight: 500 }}>{a.trabajadorNombre}</td>
                       <td>
                         {MESES[a.mesDescuento]} {a.anioDescuento}
                       </td>
-                      <td>{a.estado}</td>
+                      <td style={{ fontSize: 11, color: 'var(--text2)' }}>{a.desc?.trim() || '—'}</td>
+                      <td>
+                        <span className={`badge ${pendienteVisual ? 'b-amber' : 'b-gray'}`}>{estadoLbl}</span>
+                      </td>
+                      <td className="tr" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                        {fmt(a.monto)}
+                      </td>
                       <td>
                         <div className="row-acts">
                           {(a.estado === 'Activo' || a.estado === 'Pendiente') && (
@@ -381,7 +444,8 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -395,14 +459,14 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
         <>
           <div className="card card-ant">
             <div className="card-title">
-              <div className="card-title-left">Nuevo crédito a mecánico (cuotas)</div>
+              <div className="card-title-left">💳 Créditos de trabajadores</div>
             </div>
             <div className="g4-ot-row1">
               <div className="field">
                 <label>Trabajador *</label>
                 <select value={credMecId} onChange={(e) => setCredMecId(e.target.value)}>
                   <option value="">— Seleccionar —</option>
-                  {db.mecanicos.filter((m) => m.activo).map((m) => (
+                  {db.mecanicos.filter(mecanicoEnNomina).map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.nombre}
                     </option>
@@ -419,8 +483,8 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
               </div>
             </div>
             <div className="field field-full">
-              <label>Descripción</label>
-              <input placeholder="Ej: Préstamo herramientas" value={credDesc} onChange={(e) => setCredDesc(e.target.value)} />
+              <label>Motivo del crédito</label>
+              <input placeholder="Ej: Préstamo para reparación auto, emergencia..." value={credDesc} onChange={(e) => setCredDesc(e.target.value)} />
             </div>
             <div className="form-row-actions">
               <button
@@ -470,15 +534,15 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
 
           <div className="card card-ant">
             <div className="card-title">
-              <div className="card-title-left">Créditos registrados</div>
-              <span className="card-count">{settings.extras.creditosMec.length}</span>
+              <div className="card-title-left">Créditos activos</div>
+              <span className="card-count">{settings.extras.creditosMec.filter((c) => c.estado === 'Activo').length}</span>
             </div>
-            {!settings.extras.creditosMec.length ? (
-              <div className="empty empty-sm">Sin créditos</div>
+            {!settings.extras.creditosMec.filter((c) => c.estado === 'Activo').length ? (
+              <div className="empty empty-sm">Sin créditos activos</div>
             ) : (
               <div className="cred-mec-list">
-                {[...settings.extras.creditosMec]
-                  .sort((a, b) => (a.estado === 'Pagado' ? 1 : 0) - (b.estado === 'Pagado' ? 1 : 0))
+                {settings.extras.creditosMec
+                  .filter((c) => c.estado === 'Activo')
                   .map((c) => (
                     <div key={c.id} className="exp-row cred-mec-exp">
                       <button type="button" className="exp-hdr cred-mec-hdr" onClick={() => setCredOpen((x) => (x === c.id ? null : c.id))}>
@@ -517,7 +581,7 @@ export function AnticiposModule({ db, setDb, settings, setSettings, showToast }:
                                       {cu.mes} {cu.anio}
                                     </td>
                                     <td>{fmt(cu.monto)}</td>
-                                    <td>{cu.pagado ? `Pagado ${cu.fechaPago || ''}` : 'Pendiente'}</td>
+                                    <td>{cu.pagado ? `Pagado ${cu.fechaPago ? isoDateToDdMmYyyy(cu.fechaPago) : ''}` : 'Pendiente'}</td>
                                     <td>
                                       {!cu.pagado && c.estado !== 'Pagado' ? (
                                         <button

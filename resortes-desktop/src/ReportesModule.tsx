@@ -1,7 +1,6 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
 import type { AppSettings, Db } from './appTypes'
 import { LiquidacionTrabajadores } from './LiquidacionTrabajadores'
-import { lineTotalConIva } from './opsHelpers'
 import { MESES_REM } from './remuneracionesHelpers'
 
 type Props = {
@@ -15,6 +14,10 @@ type Props = {
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
+}
+
+function fmtUnd(n: number) {
+  return `${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(Math.round(n))} und`
 }
 
 function ultimos6MesesVentas(ventas: { fecha: string; total: number }[]) {
@@ -65,6 +68,7 @@ export function ReportesModule({
   const gasTotal = useMemo(() => db.gastos.reduce((s, g) => s + g.monto, 0), [db.gastos])
   const utilidad = ingTotal - gasTotal
   const margen = ingTotal > 0 ? (utilidad / ingTotal) * 100 : 0
+  const margenPct = Math.round(margen)
 
   const ing6 = useMemo(() => ultimos6MesesVentas(db.ventas), [db.ventas])
   const gas6 = useMemo(() => ultimos6MesesGastos(db.gastos), [db.gastos])
@@ -73,24 +77,32 @@ export function ReportesModule({
   const util6 = useMemo(() => ing6.map((x, i) => ({ label: x.label, value: x.value - (gas6[i]?.value || 0) })), [ing6, gas6])
   const maxUtil = Math.max(...util6.map((x) => Math.abs(x.value)), 1)
 
+  /** Igual que el HTML: suma cantidades en ventas + órdenes de trabajo */
   const topProductos = useMemo(() => {
     const map: Record<string, number> = {}
     for (const v of db.ventas) {
       for (const it of v.items) {
         const k = it.nombre.trim() || 'Sin nombre'
-        map[k] = (map[k] || 0) + lineTotalConIva(it)
+        map[k] = (map[k] || 0) + (Number(it.qty) || 0)
+      }
+    }
+    for (const o of db.ordenes) {
+      for (const it of o.items) {
+        const k = it.nombre.trim() || 'Sin nombre'
+        map[k] = (map[k] || 0) + (Number(it.qty) || 0)
       }
     }
     return Object.entries(map)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
-  }, [db.ventas])
+  }, [db.ventas, db.ordenes])
 
+  /** Igual que el HTML: clientes por monto total en ventas */
   const topClientes = useMemo(() => {
     const map: Record<string, number> = {}
     for (const v of db.ventas) {
       const k = v.clienteNombre.trim() || 'Sin nombre'
-      map[k] = (map[k] || 0) + 1
+      map[k] = (map[k] || 0) + v.total
     }
     return Object.entries(map)
       .sort((a, b) => b[1] - a[1])
@@ -99,22 +111,18 @@ export function ReportesModule({
 
   return (
     <>
-      <div className="inv-tabs anticipos-tabs">
-        <button type="button" className={tab === 'finanzas' ? 'inv-tab active' : 'inv-tab'} onClick={() => setTab('finanzas')}>
-          Resumen financiero
+      <div className="agenda-html-tabs tabs rep-main-tabs">
+        <button type="button" className={tab === 'finanzas' ? 'tab active' : 'tab'} onClick={() => setTab('finanzas')}>
+          📊 Resumen financiero
         </button>
-        <button
-          type="button"
-          className={tab === 'remuneraciones' ? 'inv-tab active' : 'inv-tab'}
-          onClick={() => setTab('remuneraciones')}
-        >
-          Remuneraciones y comisiones
+        <button type="button" className={tab === 'remuneraciones' ? 'tab active' : 'tab'} onClick={() => setTab('remuneraciones')}>
+          💼 Remuneraciones y comisiones
         </button>
       </div>
 
       {tab === 'finanzas' && (
         <>
-          <div className="stats stats-reportes">
+          <div className="stats stats-reportes cred-stats-html" style={{ marginBottom: 14 }}>
             <div className="stat">
               <div className="stat-lbl">Ingresos totales</div>
               <div className="stat-val">{fmt(ingTotal)}</div>
@@ -133,8 +141,8 @@ export function ReportesModule({
             </div>
             <div className="stat">
               <div className="stat-lbl">Margen neto</div>
-              <div className="stat-val" style={{ color: margen >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {margen.toFixed(1)}%
+              <div className="stat-val" style={{ color: margenPct >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {margenPct}%
               </div>
             </div>
           </div>
@@ -160,10 +168,10 @@ export function ReportesModule({
               </div>
               {topProductos.length ? (
                 <ul className="rep-lista">
-                  {topProductos.map(([nombre, sub]) => (
+                  {topProductos.map(([nombre, qty]) => (
                     <li key={nombre}>
                       <span>{nombre}</span>
-                      <strong>{fmt(sub)}</strong>
+                      <strong style={{ color: 'var(--accent)' }}>{fmtUnd(qty)}</strong>
                     </li>
                   ))}
                 </ul>
@@ -173,22 +181,27 @@ export function ReportesModule({
             </div>
             <div className="card card-rep">
               <div className="card-title">
-                <div className="card-title-left">Utilidad por mes (ingresos − gastos)</div>
+                <div className="card-title-left">Utilidad por mes (Ingresos − Gastos)</div>
               </div>
               <div className="chart-bars chart-bars-tall">
-                {util6.map((d) => (
-                  <div key={d.label} className="chart-bar-wrap">
-                    <div className="chart-val">{d.value ? fmt(d.value) : ''}</div>
-                    <div
-                      className="chart-bar"
-                      style={{
-                        height: `${Math.round((Math.abs(d.value) / maxUtil) * 160) || 2}px`,
-                        background: d.value >= 0 ? 'var(--green)' : 'var(--red)',
-                      }}
-                    />
-                    <div className="chart-lbl">{d.label}</div>
-                  </div>
-                ))}
+                {util6.map((d) => {
+                  const col = d.value >= 0 ? 'var(--green)' : 'var(--red)'
+                  return (
+                    <div key={d.label} className="chart-bar-wrap">
+                      <div className="chart-val" style={{ color: col }}>
+                        {d.value !== 0 ? fmt(d.value) : ''}
+                      </div>
+                      <div
+                        className="chart-bar"
+                        style={{
+                          height: `${Math.round((Math.abs(d.value) / maxUtil) * 160) || 2}px`,
+                          background: col,
+                        }}
+                      />
+                      <div className="chart-lbl">{d.label}</div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
             <div className="card card-rep">
@@ -197,12 +210,10 @@ export function ReportesModule({
               </div>
               {topClientes.length ? (
                 <ul className="rep-lista">
-                  {topClientes.map(([nombre, n]) => (
+                  {topClientes.map(([nombre, tot]) => (
                     <li key={nombre}>
                       <span>{nombre}</span>
-                      <strong>
-                        {n} venta{n !== 1 ? 's' : ''}
-                      </strong>
+                      <strong style={{ color: 'var(--accent)' }}>{fmt(tot)}</strong>
                     </li>
                   ))}
                 </ul>

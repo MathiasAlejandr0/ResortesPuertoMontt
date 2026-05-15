@@ -1,13 +1,13 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
 import type { Db, Gasto } from './appTypes'
+import { isoDateToDdMmYyyy } from './dateFormat'
+import { CANONICAL_GASTO_CATEGORIAS, normalizeGastoCategoria } from './gastosCategoria'
 
 type Props = {
   db: Db
   setDb: Dispatch<SetStateAction<Db>>
   showToast: (msg: string, type?: 'ok' | 'err' | 'warn') => void
 }
-
-const CATEGORIAS_GASTO = ['Arriendo', 'Servicios básicos', 'Herramientas', 'Repuestos', 'Marketing', 'Otros']
 
 function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
@@ -39,6 +39,8 @@ export function GastosModule({ db, setDb, showToast }: Props) {
     return rows
   }, [db.gastos, buscar, desde, hasta])
 
+  const totalLista = useMemo(() => lista.reduce((s, g) => s + g.monto, 0), [lista])
+
   const registrar = () => {
     const d = desc.trim()
     if (!d) {
@@ -53,7 +55,7 @@ export function GastosModule({ db, setDb, showToast }: Props) {
     const nuevo: Gasto = {
       id: uid(),
       desc: d,
-      categoria: cat,
+      categoria: normalizeGastoCategoria(cat),
       monto: m,
       fecha,
       proveedor: prov.trim(),
@@ -99,7 +101,7 @@ export function GastosModule({ db, setDb, showToast }: Props) {
           <div className="field">
             <label>Categoría</label>
             <select value={cat} onChange={(e) => setCat(e.target.value)}>
-              {CATEGORIAS_GASTO.map((c) => (
+              {CANONICAL_GASTO_CATEGORIAS.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -115,7 +117,7 @@ export function GastosModule({ db, setDb, showToast }: Props) {
             <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
           </div>
           <div className="field field-span-full">
-            <label>Proveedor / descripción extra</label>
+            <label>Proveedor / Descripción extra</label>
             <input placeholder="Opcional" value={prov} onChange={(e) => setProv(e.target.value)} />
           </div>
         </div>
@@ -144,9 +146,14 @@ export function GastosModule({ db, setDb, showToast }: Props) {
           <input type="date" className="inv-filter-select inv-date" value={desde} onChange={(e) => setDesde(e.target.value)} />
           <input type="date" className="inv-filter-select inv-date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
         </div>
+        {lista.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
+            {lista.length} gasto{lista.length !== 1 ? 's' : ''} — Total: {fmt(totalLista)}
+          </div>
+        )}
         {!lista.length ? (
           <div className="empty">
-            <div className="empty-icon">💵</div>
+            <div className="empty-icon">💸</div>
             <div>No hay gastos registrados</div>
           </div>
         ) : (
@@ -154,22 +161,26 @@ export function GastosModule({ db, setDb, showToast }: Props) {
             <table>
               <thead>
                 <tr>
-                  <th>Fecha</th>
                   <th>Descripción</th>
                   <th>Categoría</th>
-                  <th>Monto</th>
                   <th>Proveedor</th>
+                  <th>Fecha</th>
+                  <th className="tr">Monto</th>
                   <th className="th-actions">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {lista.map((g) => (
                   <tr key={g.id}>
-                    <td>{g.fecha}</td>
                     <td className="td-nombre">{g.desc}</td>
-                    <td>{g.categoria}</td>
-                    <td>{fmt(g.monto)}</td>
+                    <td>
+                      <span className="badge b-gray">{g.categoria}</span>
+                    </td>
                     <td>{g.proveedor || '—'}</td>
+                    <td>{isoDateToDdMmYyyy(g.fecha)}</td>
+                    <td className="tr" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--red)' }}>
+                      {fmt(g.monto)}
+                    </td>
                     <td>
                       <button type="button" className="btn btn-xs btn-red" onClick={() => eliminar(g.id)}>
                         Eliminar

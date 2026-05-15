@@ -20,6 +20,8 @@ export type MecanicoRef = {
   nombre: string
 }
 
+export type ClienteTipo = 'persona' | 'empresa'
+
 export type Cliente = {
   id: string
   nombre: string
@@ -30,12 +32,28 @@ export type Cliente = {
   origen: string
   obs: string
   creado: string
+  /** Paridad HTML — por defecto persona en datos antiguos */
+  tipo?: ClienteTipo
+  contactoNom?: string
+  contactoCargo?: string
+  contactoTel?: string
+  contactoEmail?: string
+  modificado?: string
+}
+
+/** Entradas de historial km (HTML legacy `histKm`) */
+export type VehiculoHistKm = {
+  fecha?: string
+  km?: number
+  obs?: string
 }
 
 export type Vehiculo = {
   id: string
   clienteId: string
   clienteNombre: string
+  /** Denormalizado (HTML / listados rápidos) */
+  clienteRut?: string
   patente: string
   marca: string
   modelo: string
@@ -45,6 +63,11 @@ export type Vehiculo = {
   vin: string
   km: number
   creado: string
+  obs?: string
+  /** Data URLs — paridad HTML fotos ingreso */
+  imgs?: string[]
+  /** Historial km registrado en el HTML */
+  histKm?: VehiculoHistKm[]
 }
 
 export type Producto = {
@@ -57,6 +80,9 @@ export type Producto = {
   costo: number
   stock: number
   smin: number
+  /** Paridad backup HTML — sync Supabase */
+  creado?: string
+  modificado?: string
 }
 
 export type Mecanico = {
@@ -68,6 +94,8 @@ export type Mecanico = {
   /** Opcional — remuneraciones / liquidaciones */
   rut?: string
   sueldoBase?: number
+  /** Paridad HTML vacaciones — contrato para saldo/antigüedad */
+  fechaContrato?: string
   activo: boolean
   creado: string
 }
@@ -84,6 +112,8 @@ export type Cotizacion = {
   marca: string
   modelo: string
   items: LineItem[]
+  /** Descuento global $ sobre el bruto de ítems (como ventas). */
+  descuento: number
   total: number
   obs: string
   estado: string
@@ -113,10 +143,23 @@ export type Orden = {
   diag: string
   obs: string
   items: LineItem[]
+  /** Descuento global $ sobre el bruto de ítems. */
+  descuento: number
   total: number
   estado: string
   cotizacionOrigen?: string
   creado: string
+  /** Paridad HTML — documento tributario asociado a la OT */
+  docTipo?: string
+  docFolio?: string
+  docFecha?: string
+  docMonto?: number
+  docAdjNombre?: string
+  docAdjMime?: string
+  docAdjDataUrl?: string
+  docAdjSize?: number
+  /** Fotos ingreso OT (HTML legacy) */
+  imgs?: string[]
 }
 
 export type Venta = {
@@ -138,6 +181,18 @@ export type Venta = {
   obs: string
   otOrigen?: string
   cotOrigen?: string
+  /** Opcional — Boleta / Factura / … */
+  docTipo?: string
+  docFolio?: string
+  docFecha?: string
+  docMonto?: number
+  docAdjNombre?: string
+  docAdjMime?: string
+  docAdjDataUrl?: string
+  docAdjSize?: number
+  chequeNumero?: string
+  chequeBanco?: string
+  chequeFechaCobro?: string
   creado: string
 }
 
@@ -154,6 +209,11 @@ export type Credito = {
   fecha: string
   vcto: string
   desc: string
+  tipo?: 'credito' | 'cheque'
+  chequeNumero?: string
+  chequeBanco?: string
+  chequeFechaCobro?: string
+  chequeEstado?: 'Pendiente' | 'Al cobro' | 'Cobrado' | 'Rechazado'
   ventaFolio?: string
   estado: string
   creado: string
@@ -190,6 +250,10 @@ export type AgendaNota = {
   fecha: string
   estado: 'pendiente' | 'completado'
   creado: string
+  /** Categoría visual (p. ej. yellow, sky, rose, violet, amber) */
+  colorTag?: string
+  clienteId?: string
+  clienteNombre?: string
 }
 
 export type AgendaRecordatorio = {
@@ -199,6 +263,12 @@ export type AgendaRecordatorio = {
   obs: string
   estado: 'pendiente' | 'completado'
   creado: string
+  hora?: string
+  prioridad?: 'normal' | 'alta' | 'urgente'
+  clienteId?: string
+  clienteNombre?: string
+  otFolio?: string
+  completadoEn?: string
 }
 
 export type AgendaReserva = {
@@ -208,8 +278,17 @@ export type AgendaReserva = {
   fecha: string
   hora: string
   motivo: string
-  estado: 'pendiente' | 'confirmada' | 'cancelada'
+  estado: 'pendiente' | 'confirmada' | 'cancelada' | 'completada'
   creado: string
+  clienteId?: string
+  vehiculoId?: string
+  patente?: string
+  marca?: string
+  modelo?: string
+  duracion?: number
+  mecanicoId?: string
+  mecanico?: string
+  obs?: string
 }
 
 export type Vacacion = {
@@ -218,8 +297,44 @@ export type Vacacion = {
   mecanicoNombre: string
   desde: string
   hasta: string
-  diasHabiles: number
   obs: string
+  creado: string
+  /** Días hábiles del período (preferido; HTML: dias) */
+  dias?: number
+  /** @deprecated usar dias */
+  diasHabiles?: number
+  anio?: number
+  estado?: 'Activo' | 'Anulado'
+  anuladoEn?: string
+}
+
+/** Pedido de fabricación (resorte a medida, etc.) — persiste en `settings.extras`. */
+export type PedidoFabricacion = {
+  folio: string
+  clienteId: string | null
+  clienteNombre: string
+  tel: string
+  fechaPedido: string
+  fechaEntregaEst: string
+  estado: string
+  mecanicoId: string
+  mecanico: string
+  /** Medidas, material, cantidad de hojas, etc. */
+  especificaciones: string
+  items: LineItem[]
+  senaRecibida: number
+  fpago: string
+  descuento: number
+  total: number
+  obs: string
+  docTipo?: string
+  docFolio?: string
+  docFecha?: string
+  docMonto?: number
+  docAdjNombre?: string
+  docAdjMime?: string
+  docAdjDataUrl?: string
+  docAdjSize?: number
   creado: string
 }
 
@@ -233,6 +348,11 @@ export type Proveedor = {
   condicionPago: string
   obs: string
   creado: string
+  web?: string
+  ciudad?: string
+  dir?: string
+  contacto?: string
+  modificado?: string
 }
 
 export type CompraProveedor = {
@@ -240,12 +360,17 @@ export type CompraProveedor = {
   proveedorId: string
   proveedorNombre: string
   fecha: string
+  /** N° factura / documento */
+  folio?: string
   descripcion: string
   categoria: string
   monto: number
   fpago: string
   obs: string
   creado: string
+  neto?: number
+  iva?: number
+  tieneIva?: boolean
 }
 
 /** Cuota de crédito interno a mecánico (HTML cash_ts3 creditosMec) */
@@ -269,6 +394,18 @@ export type CreditoMec = {
   saldo: number
   cuotasPlan: CreditoMecCuota[]
   estado: 'Activo' | 'Pagado'
+  creado: string
+}
+
+/** Registro de liquidación pagada guardado en el HTML (histórico por mecánico / mes). */
+export type LiquidacionHistorial = {
+  key: string
+  mecanicoId: string
+  mes: string
+  anio: number
+  monto: number
+  fecha: string
+  obs: string
   creado: string
 }
 
@@ -296,6 +433,10 @@ export type AppExtras = {
   creditosMec: CreditoMec[]
   /** Clave `${mecanicoId}_${mes}_${anio}` → comisión ajustada manualmente */
   comisionesAjustadas: Record<string, number>
+  /** Liquidaciones registradas en el taller (backup HTML `liquidaciones`) */
+  liquidaciones: LiquidacionHistorial[]
+  /** Pedidos de fabricación (JSON en app_settings junto al resto de extras). */
+  pedidosFabricacion: PedidoFabricacion[]
 }
 
 export type EmpresaConfig = {

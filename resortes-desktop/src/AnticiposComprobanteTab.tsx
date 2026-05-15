@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AppSettings, Db } from './appTypes'
+import { mecanicoEnNomina } from './opsHelpers'
 import {
   buildComprobanteAnticipoIndividual,
   buildComprobanteAnticiposConsolidado,
@@ -134,7 +135,7 @@ export function AnticiposComprobanteTab({ db, settings, showToast }: Props) {
     setTimeout(() => w.print(), 400)
   }
 
-  const mecsOpts = db.mecanicos.filter((m) => m.activo)
+  const mecsOpts = db.mecanicos.filter(mecanicoEnNomina)
 
   return (
     <div className="card card-ant">

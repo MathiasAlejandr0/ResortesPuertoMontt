@@ -1,4 +1,5 @@
 import type { AnticipoRegistro, AppSettings, Db } from './appTypes'
+import { fmtIsoDate } from './dateFormat'
 
 /** Paleta alineada con `:root` en App.css (impresión no hereda CSS del shell). */
 export const RPM_BRAND_PRINT = {
@@ -12,14 +13,13 @@ export const RPM_BRAND_PRINT = {
   warnBorder: '#e0c060',
 } as const
 
+/** Paridad tipográfica con el shell (must be first rule inside `<style>`). */
+export const PRINT_FONT_IMPORT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');`
+export const PRINT_FONT_SANS_STACK = `'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif`
+export const PRINT_FONT_MONO_STACK = `'JetBrains Mono', ui-monospace, monospace`
+
 export function fmtMoney(n: number) {
   return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(n))
-}
-
-export function fmtIsoDate(iso: string) {
-  if (!iso || iso.length < 10) return ''
-  const [y, m, dd] = iso.slice(0, 10).split('-')
-  return `${dd}/${m}/${y}`
 }
 
 function tipoBadgeClass(tipo: string): string {
@@ -64,8 +64,9 @@ export function buildComprobanteAnticipoIndividual(
   const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
   return `<style>
+    ${PRINT_FONT_IMPORT_CSS}
     *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    body,div,td,th,p,span{font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:${B.text}}
+    body,div,td,th,p,span{font-family:${PRINT_FONT_SANS_STACK};font-size:12px;color:${B.text}}
     .doc{max-width:740px;margin:0 auto;padding:${pad}}
     .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2.5px solid ${B.accentDark};margin-bottom:16px}
     .co-name{font-size:15px;font-weight:700;color:${B.accentDark}}
@@ -82,7 +83,7 @@ export function buildComprobanteAnticipoIndividual(
     td{padding:7px 10px;border-bottom:1px solid #eee;font-size:11px}
     tr:nth-child(even) td{background:#fafafa}
     .total-row td{background:${B.green};color:#fff;font-weight:700;font-size:13px}
-    .total-row .monto{font-size:16px;text-align:right;font-family:monospace}
+    .total-row .monto{font-size:16px;text-align:right;font-family:${PRINT_FONT_MONO_STACK}}
     .firma-section{margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
     .firma-block .lbl{font-size:10px;color:#888;margin-bottom:4px}
     .firma-line{border-top:1px solid #333;padding-top:7px;font-size:11px;color:#555}
@@ -112,7 +113,7 @@ export function buildComprobanteAnticipoIndividual(
       </div>
       <div style="text-align:right">
         <div style="font-size:10px;color:#888">Total anticipos</div>
-        <div style="font-size:22px;font-weight:700;font-family:monospace;color:${B.accent}">${fmtMoney(total)}</div>
+        <div style="font-size:22px;font-weight:700;font-family:${PRINT_FONT_MONO_STACK};color:${B.accent}">${fmtMoney(total)}</div>
       </div>
     </div>
     <div class="section-lbl">Detalle — ${escapeHtml(periodo)}</div>
@@ -126,7 +127,7 @@ export function buildComprobanteAnticipoIndividual(
           <td>${fmtIsoDate(a.fecha) || '—'}</td>
           <td>${MESES[a.mesDescuento] ?? '—'} ${a.anioDescuento}</td>
           <td>${escapeHtml(a.desc || a.tipo)}</td>
-          <td style="text-align:right;font-family:monospace;font-weight:600">${fmtMoney(a.monto)}</td>
+          <td style="text-align:right;font-family:${PRINT_FONT_MONO_STACK};font-weight:600">${fmtMoney(a.monto)}</td>
         </tr>`,
           )
           .join('')}
@@ -168,8 +169,9 @@ export function buildComprobanteAnticiposConsolidado(
   const rutOf = (a: AnticipoRegistro) => db.mecanicos.find((m) => m.id === a.trabajadorId)?.rut || ''
 
   return `<style>
+    ${PRINT_FONT_IMPORT_CSS}
     *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    body,div,td,th,p,span{font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:${B.text}}
+    body,div,td,th,p,span{font-family:${PRINT_FONT_SANS_STACK};font-size:12px;color:${B.text}}
     .doc{max-width:780px;margin:0 auto;padding:${pad}}
     .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2px solid ${B.accentDark};margin-bottom:16px}
     .co-name{font-size:16px;font-weight:700;color:${B.accentDark}}
@@ -188,7 +190,7 @@ export function buildComprobanteAnticiposConsolidado(
     .tp{color:${B.accentDark}}
     .td{color:#555}
     .to{color:#777}
-    .monto{font-size:14px;font-weight:700;color:${B.accentDark};font-family:monospace;white-space:nowrap}
+    .monto{font-size:14px;font-weight:700;color:${B.accentDark};font-family:${PRINT_FONT_MONO_STACK};white-space:nowrap}
     .fl{flex:1}.firma-lbl{font-size:9px;color:#888;margin-bottom:3px}
     .firma-line{border-bottom:1px solid #333;height:24px;min-width:160px}
     .rut-line{border-bottom:1px solid #999;height:24px;width:110px}
@@ -248,7 +250,7 @@ export function buildComprobanteAnticiposConsolidado(
         </tr>`
           })
           .join('')}
-        <tr class="total-row"><td><div class="rt"><span style="font-weight:700;font-size:12px;color:#fff">${lista.length} registro${lista.length !== 1 ? 's' : ''} · TOTAL ENTREGADO</span><span style="font-size:16px;font-weight:700;font-family:monospace;color:#fff">${fmtMoney(totalGeneral)}</span></div></td></tr>
+        <tr class="total-row"><td><div class="rt"><span style="font-weight:700;font-size:12px;color:#fff">${lista.length} registro${lista.length !== 1 ? 's' : ''} · TOTAL ENTREGADO</span><span style="font-size:16px;font-weight:700;font-family:${PRINT_FONT_MONO_STACK};color:#fff">${fmtMoney(totalGeneral)}</span></div></td></tr>
       </tbody>
     </table>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:24px">

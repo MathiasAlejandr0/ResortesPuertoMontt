@@ -1,0 +1,25 @@
+---
+description: Resortes Puerto Montt en producción — instaladores como actualización y cero pérdida de datos
+alwaysApply: false
+globs: resortes-desktop/**/*
+---
+
+# Producción: instaladores y datos
+
+La app **ya está en uso**. Los artefactos de `npm run tauri:build` son **actualizaciones** del mismo producto, no un “proyecto nuevo”.
+
+## Dónde viven los datos (no tocar sin plan)
+
+- **Supabase**: fuente de verdad del taller (`loadOnlineDb` / `saveOnlineAll`). Las migraciones SQL y el sync deben ser **compatibles hacia atrás** o con migración explícita; nunca asumir tablas vacías en producción.
+- **localStorage** (WebView2 / Tauri): tema, PINs (`rpm_pin_*`), `LS_SETTINGS` y claves legacy que aún existan. Persisten en el perfil de usuario del WebView; **no** están en la carpeta del `.exe`.
+- **Identidad del bundle**: `identifier` en `src-tauri/tauri.conf.json` y el modo de instalación NSIS (`installMode`). Cambiarlos puede hacer que Windows trate la app como **otro producto** y el usuario “pierda” el perfil local (parece datos perdidos).
+
+## Antes de generar un instalador
+
+1. Subir **`version`** en `resortes-desktop/package.json` (y alinear `src-tauri/Cargo.toml` con la misma versión por coherencia).
+2. No cambiar `identifier`, `productName` ni `installMode` entre releases salvo migración documentada y comunicada al usuario.
+3. Probar carga desde Supabase y un guardado tras la actualización en un entorno de prueba.
+
+## Desinstalación
+
+En NSIS, la opción de borrar datos de aplicación al desinstalar es decisión del **usuario** en el desinstalador. No diseñar flujos que dependan de desinstalar para actualizar.

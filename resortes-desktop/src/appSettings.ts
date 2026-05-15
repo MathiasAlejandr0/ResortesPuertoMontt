@@ -39,6 +39,8 @@ export function defaultAppSettings(): AppSettings {
       compras: [],
       creditosMec: [],
       comisionesAjustadas: {},
+      liquidaciones: [],
+      pedidosFabricacion: [],
     },
   }
 }
@@ -65,6 +67,8 @@ export function loadAppSettings(): AppSettings {
           compras: p.extras?.compras ?? d.extras.compras,
           creditosMec: p.extras?.creditosMec ?? d.extras.creditosMec,
           comisionesAjustadas: p.extras?.comisionesAjustadas ?? d.extras.comisionesAjustadas,
+          liquidaciones: p.extras?.liquidaciones ?? d.extras.liquidaciones,
+          pedidosFabricacion: p.extras?.pedidosFabricacion ?? d.extras.pedidosFabricacion,
         },
       }
     }
@@ -78,4 +82,30 @@ export function loadAppSettings(): AppSettings {
     /* ignore */
   }
   return defaultAppSettings()
+}
+
+/** Une un backup parcial con los valores por defecto (extras anidados incluidos). */
+export function mergeImportedAppSettings(p: Partial<AppSettings> | undefined): AppSettings {
+  if (!p) return defaultAppSettings()
+  const d = defaultAppSettings()
+  return {
+    empresa: { ...d.empresa, ...p.empresa },
+    banco: { ...d.banco, ...p.banco },
+    pdf: { ...d.pdf, ...p.pdf },
+    logoDataUrl: p.logoDataUrl ?? null,
+    extras: {
+      ...d.extras,
+      ...(p.extras ?? {}),
+      agendaNotas: p.extras?.agendaNotas ?? d.extras.agendaNotas,
+      agendaRecordatorios: p.extras?.agendaRecordatorios ?? d.extras.agendaRecordatorios,
+      agendaReservas: p.extras?.agendaReservas ?? d.extras.agendaReservas,
+      vacaciones: p.extras?.vacaciones ?? d.extras.vacaciones,
+      proveedores: p.extras?.proveedores ?? d.extras.proveedores,
+      compras: p.extras?.compras ?? d.extras.compras,
+      creditosMec: p.extras?.creditosMec ?? d.extras.creditosMec,
+      comisionesAjustadas: p.extras?.comisionesAjustadas ?? d.extras.comisionesAjustadas,
+      liquidaciones: p.extras?.liquidaciones ?? d.extras.liquidaciones,
+      pedidosFabricacion: p.extras?.pedidosFabricacion ?? d.extras.pedidosFabricacion,
+    },
+  }
 }

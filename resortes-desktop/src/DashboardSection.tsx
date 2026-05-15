@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { AppSettings, Db } from './appTypes'
+import { isoDateToDdMmYyyy } from './dateFormat'
 import { ordenRefsForPersist } from './opsHelpers'
 import type { Section } from './sections'
 
@@ -16,11 +17,37 @@ function fmt(n: number) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10)
+  const d = new Date()
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const da = String(d.getDate()).padStart(2, '0')
+  return `${y}-${mo}-${da}`
 }
 
-function ymNow() {
-  return todayIso().slice(0, 7)
+/** YYYY-MM según calendario local (evita el bug de `new Date('YYYY-MM-DD')` en UTC). */
+function ymTodayLocal() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Desplaza YYYY-MM un número de meses (sin usar Date ISO ni medianoche UTC). */
+function ymShift(ym: string, deltaMonths: number): string {
+  const [ys, ms] = ym.split('-').map(Number)
+  let y = ys
+  let m = ms + deltaMonths
+  while (m < 1) {
+    m += 12
+    y -= 1
+  }
+  while (m > 12) {
+    m -= 12
+    y += 1
+  }
+  return `${y}-${String(m).padStart(2, '0')}`
+}
+
+function ymFromDateLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 function mesTitulo(ym: string) {
@@ -39,7 +66,7 @@ function ultimos6Ventas(ventas: { fecha: string; total: number }[]) {
   for (let i = 5; i >= 0; i--) {
     const d = new Date()
     d.setMonth(d.getMonth() - i)
-    const k = d.toISOString().slice(0, 7)
+    const k = ymFromDateLocal(d)
     res.push({ label: mesesCortos[d.getMonth()], value: map[k] || 0 })
   }
   return res
@@ -56,11 +83,19 @@ function statusOtClass(estado: string) {
   return m[estado] || 'dash-st-def'
 }
 
-export function DashboardSection({ db, settings: _settings, setSection }: Props) {
-  void _settings
-  const [dashYm, setDashYm] = useState(ymNow())
+function addDaysIso(iso: string, deltaDays: number): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(y, (m || 1) - 1, d || 1)
+  dt.setDate(dt.getDate() + deltaDays)
+  const mo = String(dt.getMonth() + 1).padStart(2, '0')
+  const da = String(dt.getDate()).padStart(2, '0')
+  return `${dt.getFullYear()}-${mo}-${da}`
+}
 
-  const mesActual = ymNow()
+export function DashboardSection({ db, settings, setSection }: Props) {
+  const [dashYm, setDashYm] = useState(() => ymTodayLocal())
+
+  const mesActual = ymTodayLocal()
   const esMesActual = dashYm === mesActual
 
   const dashVentasMes = useMemo(
@@ -143,15 +178,75 @@ export function DashboardSection({ db, settings: _settings, setSection }: Props)
     return { ventasHoy, totalHoy, gasHoy, porFp, nGas: db.gastos.filter((g) => g.fecha === hoy).length }
   }, [db.ventas, db.gastos, hoy])
 
-  const dashMesAnterior = () => {
-    const d = new Date(dashYm + '-01')
-    d.setMonth(d.getMonth() - 1)
-    setDashYm(d.toISOString().slice(0, 7))
-  }
+  /** Igual que “Balance del día” en la tarjeta Caja del día (ventas registradas hoy − gastos hoy). */
+  const gananciasDelDia = cajaHoy.totalHoy - cajaHoy.gasHoy
+
+  const alertasMes = useMemo(() => {
+    if (!esMesActual) return [] as { key: string; label: string; onClick: () => void }[]
+    const finSemana = addDaysIso(hoy, 7)
+    const limiteOt = addDaysIso(hoy, -3)
+    const out: { key: string; label: string; onClick: () => void }[] = []
+    const otsQuiet = db.ordenes.filter((o) => o.estado !== 'Entregado' && o.fechaIn && o.fechaIn <= limiteOt)
+    if (otsQuiet.length) {
+      out.push({
+        key: 'ot-quiet',
+        label: `OTs activas con 3+ días desde el ingreso (${otsQuiet.length})`,
+        onClick: () => {
+          try {
+            sessionStorage.setItem('rpm-global-filter', otsQuiet[0]?.folio || '')
+          } catch {
+            /* ignore */
+          }
+          setSection('ordenes')
+        },
+      })
+    }
+    const cheques = db.creditos.filter(
+      (c) =>
+        c.tipo === 'cheque' &&
+        c.chequeFechaCobro &&
+        c.chequeFechaCobro >= hoy &&
+        c.chequeFechaCobro <= finSemana &&
+        c.estado !== 'Pagado' &&
+        c.saldo > 0,
+    )
+    if (cheques.length) {
+      out.push({
+        key: 'cheq',
+        label: `Cheques a cobrar esta semana (${cheques.length})`,
+        onClick: () => setSection('creditos'),
+      })
+    }
+    const pedidos = settings.extras.pedidosFabricacion ?? []
+    const pedListos = pedidos.filter((p) => p.estado === 'Listo para retiro')
+    if (pedListos.length) {
+      out.push({
+        key: 'pf',
+        label: `Pedidos listos para retiro sin marcar retirado (${pedListos.length})`,
+        onClick: () => {
+          try {
+            sessionStorage.setItem('rpm-global-filter', pedListos[0]?.folio || '')
+          } catch {
+            /* ignore */
+          }
+          setSection('pedidosFabricacion')
+        },
+      })
+    }
+    const credVen = db.creditos.filter((c) => c.saldo > 0 && c.vcto && c.vcto < hoy && c.estado !== 'Pagado')
+    if (credVen.length) {
+      out.push({
+        key: 'cred',
+        label: `Créditos vencidos con saldo (${credVen.length})`,
+        onClick: () => setSection('creditos'),
+      })
+    }
+    return out
+  }, [esMesActual, hoy, db.ordenes, db.creditos, settings.extras.pedidosFabricacion, setSection])
+
+  const dashMesAnterior = () => setDashYm(ymShift(dashYm, -1))
   const dashMesSiguiente = () => {
-    const d = new Date(dashYm + '-01')
-    d.setMonth(d.getMonth() + 1)
-    const next = d.toISOString().slice(0, 7)
+    const next = ymShift(dashYm, 1)
     if (next > mesActual) return
     setDashYm(next)
   }
@@ -175,6 +270,19 @@ export function DashboardSection({ db, settings: _settings, setSection }: Props)
           </button>
         )}
       </div>
+
+      {alertasMes.length > 0 ? (
+        <div className="dash-alerts no-print">
+          <div className="dash-alerts-title">Alertas</div>
+          <div className="dash-alert-list">
+            {alertasMes.map((a) => (
+              <button key={a.key} type="button" className="dash-alert-link" onClick={a.onClick}>
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="stats" style={{ marginBottom: 14 }}>
         <div className="stat">
@@ -223,6 +331,13 @@ export function DashboardSection({ db, settings: _settings, setSection }: Props)
               <div className="stat-lbl">Acum. histórico</div>
               <div className="stat-val">{fmt(ingTotal - gasTotal)}</div>
               <div className="stat-sub">utilidad total</div>
+            </div>
+            <div className="stat">
+              <div className="stat-lbl">Ganancias del día</div>
+              <div className="stat-val" style={{ color: gananciasDelDia >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {fmt(gananciasDelDia)}
+              </div>
+              <div className="stat-sub">ingresos − gastos · hoy</div>
             </div>
           </>
         )}
@@ -514,7 +629,9 @@ export function DashboardSection({ db, settings: _settings, setSection }: Props)
                         <td>
                           <span className={venc ? 'dash-est dash-st-venc' : `dash-est ${statusOtClass(o.estado)}`}>{lbl}</span>
                         </td>
-                        <td style={venc ? { color: 'var(--red)', fontWeight: 600 } : { fontSize: 12 }}>{o.fechaEst || '—'}</td>
+                        <td style={venc ? { color: 'var(--red)', fontWeight: 600 } : { fontSize: 12 }}>
+                          {o.fechaEst ? isoDateToDdMmYyyy(o.fechaEst) : '—'}
+                        </td>
                       </tr>
                     )
                   })}
